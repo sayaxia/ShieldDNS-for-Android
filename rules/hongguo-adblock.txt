@@ -1,0 +1,28 @@
+# ShieldDNS 策略订阅 · 红果短剧广告拦截
+# 语法：||域名^ 拦截该域及其子域，@@||域名^ 例外放行（优先于拦截），* 通配
+# 说明：这份只收红果自身的广告投放、素材、签名域名；第三方广告 SDK 的整域拦截
+#       放在应用内置规则里，只对白名单应用生效，不会波及其它 App。
+# 更新：随仓库 main 分支维护，可随时重新拉取。
+
+! ---- 广告投放接口 ----
+||ads*.zijieapi.com^
+||ad.zijieapi.com^
+
+! ---- 广告素材与签名（服务端随机前缀，按命名特征拦）----
+||*-reading-ad.*^
+||*-ad-sign*^
+||*-mgsdk-sign*^
+
+! ---- 激励视频挂件 / 优量汇点击 / 巨量引擎 ----
+||praisewindow.ugsdk.cn^
+||pgdt.gtimg.cn^
+||oceanengine.com^
+
+! ---- 例外：正片、正片 CDN、书封图片优先放行 ----
+@@||*reading-video*^
+@@||*videocdn*^
+@@||*reading.fqnovelstatic*^
+@@||*reading.fqnovelpic*^
+@@||*misc-hl.fqnovel.com^
+@@||*applog-hl.fqnovel.com^
+@@||*novel.byteimg.com^
