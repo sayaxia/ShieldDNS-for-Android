@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+*/build/
+
+# 本地环境（每台机器不同）
+local.properties
+
+# 签名材料，绝不入库
+keystore/
+*.jks
+*.keystore
+
+# 构建产物
+*.apk
+*.aab
+*.zip
+
+# IDE
+.idea/
+*.iml
+captures/
+.cxx/

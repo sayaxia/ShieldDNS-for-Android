@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ShieldDNS" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#0B0F0D</item>
+        <item name="android:statusBarColor">#0B0F0D</item>
+        <item name="android:navigationBarColor">#0B0F0D</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">#3EE08A</item>
+        <item name="android:textColorPrimary">#E8F2EC</item>
+        <item name="android:textColorSecondary">#8FA79B</item>
+        <item name="android:textColorHint">#5F7A6D</item>
+    </style>
+</resources>
