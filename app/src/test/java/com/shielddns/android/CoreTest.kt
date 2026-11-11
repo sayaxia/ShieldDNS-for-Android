@@ -67,6 +67,46 @@ class CoreTest {
     }
 
     @Test
+    fun wildcardRulesMatchDynamicAdHosts() {
+        val e = RuleEngine()
+        e.rebuild(
+            emptyList(),
+            """
+            ||*.reading-ad.*^
+            ||ads*.zijieapi.com^
+            ||*-ad-sign.byteimg.com^
+            ||*-daily-reading-ad.qznovelvod.com^
+            ||*-reading-ad.qznovelvod.com^
+            """.trimIndent()
+        )
+
+        // 之前这些域名一条规则都匹配不上，App 因此陷入重连风暴
+        assertTrue(e.isBlocked("v95-aw-reading-ad.qznovelvod.com"))
+        assertTrue(e.isBlocked("v13-reading-ad.qznovelvod.com"))
+        assertTrue(e.isBlocked("v5-se-sjy-daily-reading-ad.qznovelvod.com"))
+        assertTrue(e.isBlocked("ads3-normal-hl.zijieapi.com"))
+        assertTrue(e.isBlocked("ads.zijieapi.com"))
+        assertTrue(e.isBlocked("p3-ad-sign.byteimg.com"))
+        assertTrue(e.isBlocked("p9-ad-sign.byteimg.com"))
+
+        // 正片、接口不受通配影响
+        assertFalse(e.isBlocked("v5-reading-video-c.qznovelvod.com"))
+        assertFalse(e.isBlocked("v26-reading-videocdn302.qznovelvod.com"))
+        assertFalse(e.isBlocked("api5-normal-hl.fqnovel.com"))
+    }
+
+    @Test
+    fun wildcardExceptionWins() {
+        val e = RuleEngine()
+        e.rebuild(
+            emptyList(),
+            "||*-ad-sign.byteimg.com^\n@@||p9-ad-sign.byteimg.com^"
+        )
+        assertTrue(e.isBlocked("p3-ad-sign.byteimg.com"))
+        assertFalse(e.isBlocked("p9-ad-sign.byteimg.com"))
+    }
+
+    @Test
     fun emptyRulesNeverBlock() {
         val e = RuleEngine()
         e.rebuild(emptyList(), "")

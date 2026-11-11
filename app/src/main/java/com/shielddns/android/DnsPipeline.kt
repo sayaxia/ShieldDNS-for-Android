@@ -17,7 +17,12 @@ class DnsPipeline(
     private val onQuery: (String, Boolean, Boolean, Boolean) -> Unit,
     private val onCached: () -> Unit,
     private val onForwardFailed: () -> Unit,
-    private val deliver: (ByteArray) -> Unit
+    private val deliver: (ByteArray) -> Unit,
+    /**
+     * SNI 层广告规则是否也用在 DNS 层。返回 true 时直接本地回 NXDOMAIN，
+     * 客户端拿不到 IP 就不会建连，省掉「拦了 TCP 又被疯狂重连」的开销。
+     */
+    private val sniBlocks: (String) -> Boolean = { false }
 ) {
 
     private data class Entry(val payload: ByteArray, val expires: Long)
@@ -70,6 +75,15 @@ class DnsPipeline(
         if (engine.isBlocked(q.name)) {
             val zero = blockMode() == "zero"
             respond(DnsPackets.buildResponse(query, 0, q.questionEnd, if (zero) 0 else 3, zero))
+            onQuery(q.name, true, viaTcp, false)
+            return
+        }
+
+        // 增强模式下把广告规则下沉到 DNS：命中就地回 NXDOMAIN。
+        // 否则客户端拿到 IP 后会不停重连，每次都要建 TCP 读 ClientHello 再 RST，
+        // 实测一个广告素材域名 10 分钟能被重试 20 万次。
+        if (sniBlocks(q.name)) {
+            respond(DnsPackets.buildResponse(query, 0, q.questionEnd, 3, false))
             onQuery(q.name, true, viaTcp, false)
             return
         }

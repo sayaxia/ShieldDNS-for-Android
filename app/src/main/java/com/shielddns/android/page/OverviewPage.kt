@@ -31,10 +31,8 @@ class OverviewPage(private val a: MainActivity) : Page {
     private val subText: TextView
     private val updateBtn: TextView
     private val warn: TextView
-    private val pausedHint: TextView
     private val metrics = mutableMapOf<String, TextView>()
     private val recentBox: LinearLayout
-    private val footer: TextView
     private var syncing = false
     private var updating = false
 
@@ -74,7 +72,7 @@ class OverviewPage(private val a: MainActivity) : Page {
         top.addView(toggle, lpWrap())
         hero.addView(top, lpFull())
 
-        warn = Ui.text(a, "系统「私人 DNS」已开启，查询会绕开本应用", 12f, Ui.WARN, true).apply {
+        warn = Ui.text(a, "私人 DNS 已开启，拦截失效", 12f, Ui.WARN, true).apply {
             visibility = View.GONE
         }
         hero.addView(warn, lpFullWith(topMargin = 8))
@@ -99,13 +97,6 @@ class OverviewPage(private val a: MainActivity) : Page {
 
         // ---------- 运行指标 ----------
         column.addView(Ui.sectionTitle(a, "运行指标"), lpFullWith(bottomMargin = 8))
-
-        pausedHint = Ui.text(
-            a,
-            "保护开启后开始统计；现在所有查询直接走系统 DNS，本应用不介入。",
-            12f, Ui.MUTED
-        ).apply { setLineSpacing(Ui.dp(a, 3).toFloat(), 1f) }
-        column.addView(pausedHint, lpFullWith(bottomMargin = 10))
 
         val grid = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         val labels = listOf(
@@ -148,11 +139,6 @@ class OverviewPage(private val a: MainActivity) : Page {
         recentBox = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         recentCard.addView(recentBox, lpFull())
         column.addView(recentCard, lpFull())
-
-        footer = Ui.text(a, "无内置规则，规则需自行添加", 11f, 0xFF5F7A6D.toInt()).apply {
-            gravity = Gravity.CENTER
-        }
-        column.addView(footer, lpFullWith(topMargin = 16))
 
         view = scroll
     }
@@ -231,12 +217,11 @@ class OverviewPage(private val a: MainActivity) : Page {
                 warn.visibility = View.VISIBLE
             }
             privateDnsOn() -> {
-                warn.text = "系统「私人 DNS」已开启，查询会绕开本应用"
+                warn.text = "私人 DNS 已开启，拦截失效"
                 warn.visibility = View.VISIBLE
             }
             else -> warn.visibility = View.GONE
         }
-        pausedHint.visibility = if (running) View.GONE else View.VISIBLE
 
         metrics["total"]?.text = Stats.total.get().toString()
         metrics["blocked"]?.text = Stats.blocked.get().toString()
@@ -263,7 +248,7 @@ class OverviewPage(private val a: MainActivity) : Page {
             recentBox.addView(
                 Ui.text(
                     a,
-                    if (Stats.running) "还没有查询" else "开启防护后这里会显示最近的查询",
+                    "暂无记录",
                     12f, Ui.MUTED
                 ),
                 lpWrapWith(topMargin = 2)

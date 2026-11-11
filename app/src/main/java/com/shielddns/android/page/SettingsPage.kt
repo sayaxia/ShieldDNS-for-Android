@@ -44,7 +44,7 @@ class SettingsPage(private val a: MainActivity) : Page {
         column.addView(Ui.sectionTitle(a, "上游 DNS"))
         val upCard = Ui.card(a).apply { setPadding(Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14)) }
         val group = RadioGroup(a).apply { orientation = RadioGroup.VERTICAL }
-        val sysRb = radio("跟随系统（读取当前网络下发的 DNS）")
+        val sysRb = radio("跟随系统")
         val cusRb = radio("自定义上游")
         group.addView(sysRb)
         group.addView(cusRb)
@@ -73,9 +73,6 @@ class SettingsPage(private val a: MainActivity) : Page {
             Prefs.upstreamMode = if (custom) "custom" else "system"
         }
         customInput.doAfterTextChanged { Prefs.customUpstream = it?.toString()?.trim() ?: "" }
-        upCard.addView(Ui.text(a, "跟随系统时汇总当前所有活动网络（WLAN / 蜂窝）下发的 IPv4 DNS，默认网络优先，其余兜底；切网时自动刷新。自定义时用逗号分隔多个地址，前一个超时自动换下一个；UDP 与 TCP 查询都会走同一组上游。", 11.5f, Ui.MUTED).apply {
-            setPadding(0, Ui.dp(a, 8), 0, 0)
-        })
         column.addView(upCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
 
         // ---- 拦截响应 ----
@@ -93,14 +90,72 @@ class SettingsPage(private val a: MainActivity) : Page {
         respCard.addView(respGroup)
         column.addView(respCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
 
+        // ---- SNI 增强拦截 ----
+        column.addView(Ui.sectionTitle(a, "SNI 增强拦截"))
+        val sniCard = Ui.card(a).apply { setPadding(Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14)) }
+        sniCard.addView(switchRow(
+            "启用增强拦截",
+            "",
+            Prefs.enhanceEnabled
+        ) { on ->
+            Prefs.enhanceEnabled = on
+            if (Stats.running) {
+                android.widget.Toast.makeText(
+                    a, "已保存，重新开关防护后生效", android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        })
+        sniCard.addView(Ui.spacer(a, 12))
+        sniCard.addView(switchRow(
+            "命中广告域名时阻断",
+            "",
+            Prefs.sniBlockEnabled
+        ) { on ->
+            Prefs.sniBlockEnabled = on
+            if (Stats.running) {
+                android.widget.Toast.makeText(
+                    a, "已保存，重新开关防护后生效", android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        })
+        sniCard.addView(Ui.spacer(a, 12))
+        sniCard.addView(switchRow(
+            "连带拦直播 CDN",
+            "",
+            Prefs.blockLiveCdn
+        ) { on ->
+            Prefs.blockLiveCdn = on
+            if (Stats.running) {
+                android.widget.Toast.makeText(
+                    a, "已保存，重新开关防护后生效", android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        })
+        sniCard.addView(Ui.spacer(a, 12))
+        val pkgRow = Ui.row(a)
+        pkgRow.addView(Ui.text(a, "应用包名", 12.5f, Ui.TEXT), Ui.lpWeight(1f))
+        val pkgEdit = EditText(a).apply {
+            setText(Prefs.enhancePackage)
+            hint = "com.phoenix.read"
+            textSize = 12f
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine()
+        }
+        pkgEdit.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) Prefs.enhancePackage = pkgEdit.text.toString()
+        }
+        pkgRow.addView(pkgEdit, Ui.lpWeight(1.3f))
+        sniCard.addView(pkgRow, Ui.lpMatch().apply { topMargin = Ui.dp(a, 4) })
+        column.addView(sniCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
+
         // ---- 缓存与自动更新 ----
         column.addView(Ui.sectionTitle(a, "缓存与更新"))
         val miscCard = Ui.card(a).apply { setPadding(Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14)) }
-        miscCard.addView(switchRow("缓存允许的查询结果", "按应答里的 TTL 缓存，命中率越高越省流量", Prefs.cacheEnabled) {
+        miscCard.addView(switchRow("缓存查询结果", "", Prefs.cacheEnabled) {
             Prefs.cacheEnabled = it
         })
         miscCard.addView(Ui.spacer(a, 10))
-        miscCard.addView(switchRow("订阅每 24 小时自动更新", "从没更新过、或距上次更新超过 24 小时，会在开启防护后自动拉一次", Prefs.autoUpdate) {
+        miscCard.addView(switchRow("订阅每 24 小时自动更新", "", Prefs.autoUpdate) {
             Prefs.autoUpdate = it
         })
         column.addView(miscCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
@@ -108,19 +163,19 @@ class SettingsPage(private val a: MainActivity) : Page {
         // ---- 诊断导出 ----
         column.addView(Ui.sectionTitle(a, "诊断导出"))
         val diagCard = Ui.card(a).apply { setPadding(Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14)) }
-        diagCard.addView(Ui.text(
-            a,
-            "导出查询日志为 CSV（含版本、当前网络、上游、规则数与高频域名）。复现某个应用的广告后立刻导出，日志里就是它那段时间的 DNS 请求。",
-            11.5f, Ui.MUTED
-        ))
         val diagRow = Ui.row(a)
         val windows = ArrayList<Pair<String, Long?>>().apply {
-            add("最近 2 分钟" to 120_000L)
-            add("最近 10 分钟" to 600_000L)
+            add("2 分钟" to 120_000L)
+            add("5 分钟" to 300_000L)
+            add("10 分钟" to 600_000L)
             add("全部" to null)
         }
+        val btnH = Ui.dp(a, 36)
         windows.forEachIndexed { idx, pair ->
             val b = Ui.button(a, pair.first, primary = false)
+            b.textSize = 11.5f
+            b.isSingleLine = true
+            b.setPadding(0, 0, 0, 0)
             b.setOnClickListener {
                 runCatching { Diagnostics.export(a, pair.second) }.onFailure {
                     android.widget.Toast.makeText(
@@ -128,8 +183,8 @@ class SettingsPage(private val a: MainActivity) : Page {
                     ).show()
                 }
             }
-            val lp = Ui.lpWeight(1f)
-            if (idx < windows.size - 1) lp.rightMargin = Ui.dp(a, 8)
+            val lp = LinearLayout.LayoutParams(0, btnH, 1f)
+            if (idx < windows.size - 1) lp.rightMargin = Ui.dp(a, 6)
             diagRow.addView(b, lp)
         }
         diagCard.addView(diagRow, Ui.lpMatch().apply { topMargin = Ui.dp(a, 10) })
@@ -142,18 +197,15 @@ class SettingsPage(private val a: MainActivity) : Page {
         ver.addView(Ui.text(a, "ShieldDNS for Android", 14f, Ui.TEXT, true), Ui.lpWeight(1f))
         ver.addView(Ui.text(a, "v${com.shielddns.android.BuildConfig.VERSION_NAME}", 12f, Ui.MUTED))
         about.addView(ver)
-        about.addView(Ui.text(a, "本地 VPN 形式接管 DNS · Kotlin 内核 · 无内置规则", 11.5f, Ui.MUTED).apply {
-            setPadding(0, Ui.dp(a, 6), 0, 0)
-        })
         about.addView(Ui.text(
             a,
-            "系统「私人 DNS（Private DNS）」开启时，解析会走 DoT 绕过本应用。拦截不生效时请在系统设置里把私人 DNS 设为「关闭」。也可以在系统「始终开启的 VPN」里选中 ShieldDNS，重启后自动生效。",
+            "私人 DNS 开启时拦截失效，需在系统设置里关闭",
             11.5f, Ui.MUTED
-        ).apply { setPadding(0, Ui.dp(a, 8), 0, Ui.dp(a, 12)) })
+        ).apply { setPadding(0, Ui.dp(a, 6), 0, Ui.dp(a, 10)) })
 
         // ---- 检查更新（GitHub Release） ----
-        updateStatus = Ui.text(a, "检查 GitHub Release 上的最新版本，有新版可直接下载并安装。", 11.5f, Ui.MUTED).apply {
-            setPadding(0, Ui.dp(a, 12), 0, 0)
+        updateStatus = Ui.text(a, "", 11.5f, Ui.MUTED).apply {
+            setPadding(0, Ui.dp(a, 10), 0, 0)
         }
         about.addView(updateStatus)
         updateBtn = Ui.button(a, "检查更新", primary = false)
@@ -189,7 +241,9 @@ class SettingsPage(private val a: MainActivity) : Page {
         val row = Ui.row(a)
         val left = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         left.addView(Ui.text(a, title, 13f, Ui.TEXT))
-        left.addView(Ui.text(a, desc, 11.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(a, 4), 0, 0) })
+        if (desc.isNotEmpty()) {
+            left.addView(Ui.text(a, desc, 11.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(a, 4), 0, 0) })
+        }
         row.addView(left, Ui.lpWeight(1f))
         val sw = Ui.switchWidget(a, initial)
         sw.setOnCheckedChangeListener { _, checked -> onChange(checked) }

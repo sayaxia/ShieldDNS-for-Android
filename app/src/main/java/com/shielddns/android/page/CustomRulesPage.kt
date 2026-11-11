@@ -28,12 +28,17 @@ class CustomRulesPage(private val a: MainActivity) : Page {
         }
         scroll.addView(column)
 
-        column.addView(Ui.sectionTitle(a, "自定义规则"))
-        column.addView(Ui.text(
-            a,
-            "每行一条，支持 ||example.com^（拦截域名及子域）、@@||ok.example.com^（例外放行）、example.com（裸域名）、0.0.0.0 example.com（hosts 格式）。注释用 ! 或 #。",
-            12f, Ui.MUTED
-        ).apply { setPadding(0, Ui.dp(a, 8), 0, Ui.dp(a, 12)) })
+        // 标题行右侧挂问号，完整写法收进弹窗，不占页面
+        val head = Ui.row(a)
+        head.addView(Ui.sectionTitle(a, "自定义规则"), Ui.lpWeight(1f))
+        val helpIcon = Ui.text(a, "?", 11f, Ui.MUTED, true).apply {
+            gravity = android.view.Gravity.CENTER
+            background = Ui.rounded(0x00000000, 999, 0xFF33443C.toInt(), 1, a)
+            setOnClickListener { showSyntaxHelp() }
+        }
+        val iconSize = Ui.dp(a, 20)
+        head.addView(helpIcon, LinearLayout.LayoutParams(iconSize, iconSize))
+        column.addView(head, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 10) })
 
         val card = Ui.card(a)
         editor = EditText(a).apply {
@@ -81,6 +86,34 @@ class CustomRulesPage(private val a: MainActivity) : Page {
         updateHint()
 
         view = scroll
+    }
+
+    private fun showSyntaxHelp() {
+        android.app.AlertDialog.Builder(a)
+            .setTitle("自定义规则写法")
+            .setMessage(
+                """
+                每行一条，注释用 ! 或 # 开头。
+
+                ||example.com^
+                拦截该域名及其所有子域
+
+                ||*-reading-ad.example.com^
+                ||ads*.adcdn.com^
+                * 通配任意字符，可放在任意位置
+
+                @@||ok.example.com^
+                例外放行，优先于拦截
+
+                example.com
+                裸域名，等同拦截
+
+                0.0.0.0 example.com
+                hosts 格式
+                """.trimIndent()
+            )
+            .setPositiveButton("知道了", null)
+            .show()
     }
 
     private fun updateHint() {

@@ -44,6 +44,7 @@ class DnsVpnService : VpnService() {
         private const val NOTIF_ID = 1
         private const val VPN_ADDR = "10.111.0.2"
         private const val DNS_ADDR = "10.111.0.1"
+        private const val DEFAULT_ENHANCE_PKG = "com.phoenix.read"
 
         @Volatile
         private var alive = false
@@ -107,6 +108,11 @@ class DnsVpnService : VpnService() {
     private lateinit var pipeline: DnsPipeline
     private lateinit var resolver: Resolver
     private lateinit var tcpProxy: TcpDnsProxy
+    private lateinit var relay: TcpRelay
+
+    /** 本次 tun 是否真的挂上了白名单应用（establish 时确定，运行期只读）。 */
+    @Volatile
+    private var enhanceActive = false
     private var tun: ParcelFileDescriptor? = null
     private var output: FileOutputStream? = null
     private var reader: Thread? = null
@@ -138,9 +144,24 @@ class DnsVpnService : VpnService() {
             onQuery = { host, blocked, tcp, cached -> Stats.onQuery(host, blocked, tcp, cached) },
             onCached = { Stats.cached.incrementAndGet() },
             onForwardFailed = { Stats.failed.incrementAndGet() },
-            deliver = { packet -> writeOut(packet) }
+            deliver = { packet -> writeOut(packet) },
+            sniBlocks = { host ->
+                enhanceActive && Prefs.sniBlockEnabled &&
+                    SniRules.shouldBlock(host, Prefs.blockLiveCdn)
+            }
         )
         tcpProxy.onMessage = { msg, respond -> pipeline.onDnsMessage(msg, true, respond) }
+        relay = TcpRelay(
+            protect = { socket: Socket -> protect(socket) },
+            deliver = { packet -> writeOut(packet) }
+        )
+        relay.onSni = { host, ech -> Stats.onSni(host, ech) }
+        relay.onConnect = { ok -> Stats.onTcpConnect(ok) }
+        relay.onRelayError = { target, reason -> Stats.onRelayError(target, reason) }
+        relay.blockPolicy = { host ->
+            Prefs.sniBlockEnabled && SniRules.shouldBlock(host, Prefs.blockLiveCdn)
+        }
+        relay.onBlock = { host -> Stats.onSniBlock(host) }
         instance = this
     }
 
@@ -266,7 +287,11 @@ class DnsVpnService : VpnService() {
         output = FileOutputStream(pfd.fileDescriptor)
         alive = true
         Stats.vpnUp = true
-        Stats.listenText = "$DNS_ADDR:53（UDP + TCP，本地 VPN）"
+        Stats.listenText = if (enhanceActive) {
+            "$DNS_ADDR:53（DNS）+ 白名单应用全部 TCP（SNI 增强）"
+        } else {
+            "$DNS_ADDR:53（UDP + TCP，本地 VPN）"
+        }
         Stats.running = true
         Stats.lastError = ""
         Stats.startedAt = System.currentTimeMillis()
@@ -293,13 +318,30 @@ class DnsVpnService : VpnService() {
     /** establish 在上一次连接刚撤销时偶尔会返回 null，短重试两次再判定失败。 */
     private fun establishTun(): ParcelFileDescriptor? {
         repeat(3) { i ->
+            val enhance = Prefs.enhanceEnabled
             val builder = Builder()
-                .setSession("ShieldDNS")
+                .setSession(if (enhance) "ShieldDNS+SNI" else "ShieldDNS")
                 .setMtu(1500)
                 .addAddress(VPN_ADDR, 32)
                 .addDnsServer(DNS_ADDR)
-                .addRoute(DNS_ADDR, 32)
                 .setBlocking(true)
+
+            enhanceActive = false
+            if (enhance) {
+                // 增强模式：只让目标应用进 tun，再把全部流量路由进来，这样它的
+                // TCP:443 都能被我们看见；其它应用不受影响（它们的包根本不过 VPN）。
+                val pkg = Prefs.enhancePackage.ifBlank { DEFAULT_ENHANCE_PKG }
+                val added = runCatching { builder.addAllowedApplication(pkg) }.isSuccess
+                if (added) {
+                    builder.addRoute("0.0.0.0", 0)
+                    enhanceActive = true
+                } else {
+                    // 包名不存在/已卸载：退回普通模式，别让整条链路起不来
+                    Stats.lastError = "增强模式：找不到应用 $pkg，已按普通模式启动"
+                }
+            }
+            if (!enhanceActive) builder.addRoute(DNS_ADDR, 32)
+
             val pfd = runCatching { builder.establish() }.getOrNull()
             if (pfd != null) return pfd
             if (i < 2) runCatching { Thread.sleep(400) }
@@ -317,6 +359,8 @@ class DnsVpnService : VpnService() {
         tun = null
         runCatching { output?.close() }
         output = null
+        enhanceActive = false
+        if (::relay.isInitialized) relay.clear()
         stopWatchingNetworks()
         if (::pipeline.isInitialized) pipeline.clearCache()
     }
@@ -326,6 +370,7 @@ class DnsVpnService : VpnService() {
         Stats.running = false
         closeTun()
         if (::tcpProxy.isInitialized) tcpProxy.clear()
+        if (::relay.isInitialized) relay.clear()
         Stats.startedAt = 0L
         runCatching { main.removeCallbacksAndMessages(null) }
         removeNotification()
@@ -518,10 +563,19 @@ class DnsVpnService : VpnService() {
                 break
             }
             if (n <= 0) continue
-            // 6 = TCP，交给 TcpDnsProxy；其余按 UDP 处理（内部会自己过滤非 53 端口）
-            if ((buf[9].toInt() and 0xFF) == 6) {
-                runCatching { tcpProxy.onPacket(buf, n) }
-            } else {
+            // 6 = TCP，17 = UDP
+            val proto = buf[9].toInt() and 0xFF
+            if (proto == 6) {
+                val seg = runCatching { DnsPackets.parseTcp(buf, n) }.getOrNull()
+                if (seg != null && seg.dstPort == 53) {
+                    runCatching { tcpProxy.onPacket(buf, n) }
+                } else if (enhanceActive) {
+                    // 增强模式：非 53 的 TCP 全部交给转发层（443 顺便取 SNI）
+                    runCatching { relay.onPacket(buf, n) }
+                }
+            } else if (proto == 17) {
+                // UDP 只处理 53；增强模式下 QUIC 等其它 UDP 落到这里后被 pipeline 忽略，
+                // 等于丢掉，逼客户端回退到 TCP——这正是我们要的效果。
                 runCatching { pipeline.onPacket(buf, n) }
             }
         }

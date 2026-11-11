@@ -49,7 +49,7 @@ class UiTest {
         assertTrue("订阅更新", texts.any { it.contains("订阅更新") })
         assertTrue("监听", texts.any { it.contains("监听 10.111.0.1:53") })
         assertTrue("运行指标", texts.any { it.contains("运行指标") })
-        assertTrue("footer", texts.any { it.contains("无内置规则") })
+        assertTrue("最近查询", texts.any { it.contains("最近查询") })
     }
 
     @Test

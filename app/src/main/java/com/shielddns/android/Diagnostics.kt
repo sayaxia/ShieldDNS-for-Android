@@ -26,7 +26,8 @@ object Diagnostics {
         val dir = File(ctx.cacheDir, "diagnostics").apply { mkdirs() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(now))
         val file = File(dir, "shielddns-diag-$stamp.csv")
-        file.writeText(build(now, entries, windowMillis, all.size))
+        val enhanceText = if (Prefs.enhanceEnabled) "on (${Prefs.enhancePackage})" else "off"
+        file.writeText(build(now, entries, windowMillis, all.size, enhanceText))
         share(ctx, file)
         return file
     }
@@ -36,6 +37,7 @@ object Diagnostics {
         entries: List<LogEntry>,
         windowMillis: Long?,
         totalInMemory: Int,
+        enhanceText: String = "off",
     ): String {
         val df = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
         val sb = StringBuilder()
@@ -47,6 +49,10 @@ object Diagnostics {
         sb.append("# upstream=").append(Stats.upstreamText).append('\n')
         sb.append("# listen=").append(Stats.listenText).append('\n')
         sb.append("# rules=").append(Stats.rules).append('\n')
+        sb.append("# enhance=").append(enhanceText).append('\n')
+        sb.append("# tcp: ok=").append(Stats.tcpOk.get())
+            .append(" fail=").append(Stats.tcpFail.get())
+            .append(" sni=").append(Stats.sniHits.size).append('\n')
         sb.append("# totals: query=${Stats.total.get()} blocked=${Stats.blocked.get()} " +
             "cached=${Stats.cached.get()} failed=${Stats.failed.get()}\n")
         sb.append("# uptime=").append(Stats.uptimeText()).append('\n')
@@ -66,6 +72,28 @@ object Diagnostics {
         if (top.isNotEmpty()) {
             sb.append("# top_domains:\n")
             top.forEach { (host, n) -> sb.append("#   ").append(n).append(' ').append(host).append('\n') }
+        }
+
+        // 增强模式采集到的 SNI：这是 DNS 层看不到的那部分，直接决定规则还能不能收紧
+        val sni = Stats.sniSnapshot()
+        if (sni.isNotEmpty()) {
+            val blockedList = Stats.sniBlockedSnapshot()
+            sb.append("# sni_blocked=").append(Stats.sniBlockedTotal)
+                .append(" 次 / ").append(blockedList.size).append(" 个域名\n")
+            blockedList.forEach { (h, n) ->
+                sb.append("#   ").append(h).append(" ×").append(n).append('\n')
+            }
+        sb.append("# relay_errors=").append(Stats.relayErrors.size).append('\n')
+        synchronized(Stats.relayErrors) {
+            for (e in Stats.relayErrors) sb.append("#   ").append(e).append('\n')
+        }
+        sb.append("# sni_hits=").append(sni.size).append('\n')
+            sni.take(200).forEach {
+                sb.append("#   ").append(df.format(Date(it.time))).append(' ')
+                    .append(it.host)
+                    .append(if (it.ech) " [ech]" else "")
+                    .append('\n')
+            }
         }
 
         sb.append("time,host,result,protocol,cached\n")

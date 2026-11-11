@@ -55,6 +55,26 @@ object Prefs {
         get() = sp.getLong("lastUpdateAll", 0L)
         set(v) = sp.edit().putLong("lastUpdateAll", v).apply()
 
+    /** 增强模式：接管指定应用的 TCP 流量，按 SNI 拦截。默认关闭。 */
+    var enhanceEnabled: Boolean
+        get() = sp.getBoolean("enhanceEnabled", false)
+        set(v) = sp.edit().putBoolean("enhanceEnabled", v).apply()
+
+    /** 增强模式作用的应用包名，只挂这一个，其它应用完全不进 tun。 */
+    /** 命中 SNI 广告规则时是否直接阻断连接。 */
+    var sniBlockEnabled: Boolean
+        get() = sp.getBoolean("sniBlockEnabled", true)
+        set(v) = sp.edit().putBoolean("sniBlockEnabled", v).apply()
+
+    /** 连带拦抖音直播 CDN（会断红果直播功能），默认关 */
+    var blockLiveCdn: Boolean
+        get() = sp.getBoolean("blockLiveCdn", false)
+        set(v) = sp.edit().putBoolean("blockLiveCdn", v).apply()
+
+    var enhancePackage: String
+        get() = sp.getString("enhancePackage", "com.phoenix.read") ?: "com.phoenix.read"
+        set(v) = sp.edit().putString("enhancePackage", v.trim()).apply()
+
     fun loadSubs(): MutableList<SubEntry> {
         val raw = sp.getString("subs", "") ?: ""
         val out = mutableListOf<SubEntry>()

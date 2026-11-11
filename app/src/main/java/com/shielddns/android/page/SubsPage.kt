@@ -70,7 +70,7 @@ class SubsPage(private val a: MainActivity) : Page {
         if (subs.isEmpty()) {
             val empty = Ui.card(a)
             empty.addView(Ui.text(a, "还没有订阅", 13f, Ui.TEXT, true))
-            empty.addView(Ui.text(a, "点右上角「添加订阅」，粘贴一条 hosts 或 AdGuard 规则列表的 URL。规则不内置，需要自己加。", 12f, Ui.MUTED).apply {
+            empty.addView(Ui.text(a, "粘贴一条规则列表的 URL", 12f, Ui.MUTED).apply {
                 setPadding(0, Ui.dp(a, 6), 0, 0)
             })
             listBox.addView(empty, Ui.lpMatch())

@@ -49,6 +49,7 @@ class PipelineTest {
         rules: String,
         upstream: ((ByteArray) -> ByteArray?)?,
         out: MutableList<ByteArray>,
+        sniBlocks: (String) -> Boolean = { false },
         cached: () -> Unit = {}
     ): DnsPipeline {
         val engine = RuleEngine()
@@ -61,7 +62,8 @@ class PipelineTest {
             onQuery = { _, _, _, _ -> },
             onCached = cached,
             onForwardFailed = {},
-            deliver = { pkt -> out.add(pkt) }
+            deliver = { pkt -> out.add(pkt) },
+            sniBlocks = sniBlocks
         )
     }
 
@@ -87,6 +89,26 @@ class PipelineTest {
         assertEquals(3, dns[3].toInt() and 0x0F)        // NXDOMAIN
         assertEquals(0x22, dns[0].toInt() and 0xFF)
         ppl.shutdown()
+    }
+
+    @Test
+    fun sniRuleAlsoBlocksAtDnsLayer() {
+        val out = Collections.synchronizedList(mutableListOf<ByteArray>())
+        var forwarded = 0
+        val ppl = buildPipeline(
+            rules = "",
+            upstream = { forwarded++; null },
+            out = out,
+            sniBlocks = { it.contains("reading-ad") }
+        )
+        val pkt = queryPacket("v95-aw-reading-ad.qznovelvod.com", 0x3333)
+        ppl.onPacket(pkt, pkt.size)
+
+        assertEquals(0, forwarded)                    // 压根没往上问，客户端拿不到 IP
+        assertEquals(1, out.size)
+        val resp = answerOf(out[0])
+        assertEquals(3, resp[3].toInt() and 0x0F)      // NXDOMAIN
+        assertEquals(0, resp[7].toInt())               // 没有应答记录
     }
 
     @Test

@@ -135,7 +135,7 @@ class LogPage(private val a: MainActivity) : Page {
             card.addView(
                 Ui.text(
                     a,
-                    if (Stats.running) "还没有查询" else "开启防护后这里会记录每一次 DNS 查询",
+                    "暂无记录",
                     12f, Ui.MUTED
                 )
             )
