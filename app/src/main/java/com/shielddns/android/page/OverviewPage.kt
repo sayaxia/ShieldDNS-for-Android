@@ -26,6 +26,7 @@ class OverviewPage(private val a: MainActivity) : Page {
     private val statusText: TextView
     private val toggle: android.widget.Switch
     private val listenText: TextView
+    private val upLine: TextView
     private val rulesText: TextView
     private val subText: TextView
     private val updateBtn: TextView
@@ -80,6 +81,9 @@ class OverviewPage(private val a: MainActivity) : Page {
 
         listenText = Ui.text(a, "监听 10.111.0.1:53", 12f, Ui.MUTED)
         hero.addView(listenText, lpFullWith(topMargin = 10))
+
+        upLine = Ui.text(a, "上游 DNS —", 12f, Ui.MUTED)
+        hero.addView(upLine, lpFullWith(topMargin = 4))
 
         rulesText = Ui.text(a, "生效规则 —", 12f, Ui.MUTED)
         hero.addView(rulesText, lpFullWith(topMargin = 4))
@@ -186,14 +190,27 @@ class OverviewPage(private val a: MainActivity) : Page {
 
     override fun refresh() {
         val running = Stats.running
-        statusText.text = if (running) "防护运行中" else "保护已暂停"
-        statusText.setTextColor(if (running) Ui.ACCENT else Ui.MUTED)
+        val up = Stats.vpnUp
+        statusText.text = when {
+            running && up -> "防护运行中"
+            running -> "正在建立本地 VPN…"
+            else -> "保护已暂停"
+        }
+        statusText.setTextColor(if (running && up) Ui.ACCENT else if (running) Ui.WARN else Ui.MUTED)
         if (!updating) syncToggle()
 
         listenText.text = if (running) {
-            "监听 ${Stats.listenText}"
+            "监听 ${Stats.listenText} · ${Stats.networkText}"
         } else {
             "监听 10.111.0.1:53（本地 VPN，未启用）"
+        }
+
+        // 把「现在到底用的哪个上游」摆出来，切网时能一眼看出有没有跟着变
+        upLine.text = if (running) {
+            val mode = if (Prefs.upstreamMode == "custom") "自定义" else "跟随系统"
+            "上游 $mode · ${Stats.upstreamText}"
+        } else {
+            "上游 —"
         }
         // 上游 DNS 只在设置页显示，概览这里省空间
         rulesText.text = if (Stats.rules > 0) "生效规则 ${Stats.rules} 条" else "生效规则 —"
@@ -206,7 +223,19 @@ class OverviewPage(private val a: MainActivity) : Page {
             if (subCount > 0) append(" · $subCount 条订阅")
         }
 
-        warn.visibility = if (privateDnsOn()) View.VISIBLE else View.GONE
+        // 建立失败的原因优先显示，其次才是「私人 DNS」提醒
+        val err = Stats.lastError
+        when {
+            err.isNotEmpty() && !running -> {
+                warn.text = err
+                warn.visibility = View.VISIBLE
+            }
+            privateDnsOn() -> {
+                warn.text = "系统「私人 DNS」已开启，查询会绕开本应用"
+                warn.visibility = View.VISIBLE
+            }
+            else -> warn.visibility = View.GONE
+        }
         pausedHint.visibility = if (running) View.GONE else View.VISIBLE
 
         metrics["total"]?.text = Stats.total.get().toString()
@@ -245,11 +274,12 @@ class OverviewPage(private val a: MainActivity) : Page {
             val row = Ui.row(a).apply {
                 val v = Ui.dp(a, 6)
                 setPadding(0, v, 0, v)
+                setOnClickListener { Ui.showQueryDetail(a, e) }
             }
             row.addView(
                 Ui.text(a, e.host, 12.5f, Ui.TEXT).apply {
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             )
@@ -279,19 +309,22 @@ class OverviewPage(private val a: MainActivity) : Page {
         updating = true
         updateBtn.text = "更新中…"
         updateBtn.isEnabled = false
-        SubStore.refreshAll(a, subs, { _, _, _ -> }, { ok, fail ->
+        SubStore.refreshAll(a, subs, { _ -> }, { changed, unchanged, fail ->
             Prefs.saveSubs(subs)
             a.runOnUiThread {
                 updating = false
                 updateBtn.isEnabled = true
+                // 区分「内容真的变了」和「拉到了但没变化」，别把成功下载数当成更新数
                 updateBtn.text = when {
-                    ok > 0 && fail == 0 -> "已更新 $ok 条订阅"
-                    ok > 0 -> "更新 $ok 条，失败 $fail 条"
+                    changed > 0 && fail == 0 -> "已更新 $changed 条订阅"
+                    changed > 0 -> "更新 $changed 条，失败 $fail 条"
+                    unchanged > 0 && fail == 0 -> "$unchanged 条订阅已是最新"
+                    unchanged > 0 -> "无变化，$fail 条失败"
                     else -> "更新失败，检查网络或链接"
                 }
                 a.reloadService()
                 refresh()
-                updateBtn.postDelayed({ updateBtn.text = "更新全部订阅" }, 2200)
+                updateBtn.postDelayed({ updateBtn.text = "更新全部订阅" }, 3000)
             }
         })
     }

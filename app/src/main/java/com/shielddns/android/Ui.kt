@@ -139,4 +139,34 @@ object Ui {
 
     fun lpWeight(w: Float = 1f): LinearLayout.LayoutParams =
         LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, w)
+
+    /** 一条日志的详情弹层：完整域名（可长按选择）+ 一键复制，长域名不再被截断吃掉。 */
+    fun showQueryDetail(ctx: Context, e: LogEntry) {
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = dp(ctx, 18)
+            setPadding(p, dp(ctx, 12), p, 0)
+        }
+        box.addView(text(ctx, Stats.formatTime(e.time), 11.5f, MUTED))
+        box.addView(
+            text(ctx, e.host, 14f, TEXT).apply {
+                setPadding(0, dp(ctx, 10), 0, dp(ctx, 8))
+                setTextIsSelectable(true)
+            }
+        )
+        box.addView(
+            text(ctx, if (e.blocked) "已拦截" else "已放行", 12f, if (e.blocked) DANGER else ACCENT, true)
+        )
+
+        android.app.AlertDialog.Builder(ctx, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("查询详情")
+            .setView(box)
+            .setPositiveButton("复制域名") { _, _ ->
+                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("domain", e.host))
+                android.widget.Toast.makeText(ctx, "已复制 ${e.host}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
 }

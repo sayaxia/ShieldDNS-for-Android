@@ -68,7 +68,7 @@ class ResolverTest {
             }
         }
         try {
-            val resolver = Resolver { }
+            val resolver = Resolver({ })
             val req = query("probe.example.com", 0x0102)
             val resp = resolver.query(req, listOf(InetAddress.getByName("127.0.0.1")), 3000, port)
             assertNotNull(resp)

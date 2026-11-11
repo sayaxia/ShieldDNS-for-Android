@@ -1,0 +1,75 @@
+# 变更记录
+
+## 0.1.2（正式版，2026-11-11）
+
+本版整合了 0.1.2v1 / v2 / v3 三轮真机迭代的全部修复，下面按问题归类。
+
+### 关闭后 VPN 钥匙图标仍在、再开开不了
+- 真机证据：界面已显示「保护已暂停」，但状态栏 VPN 钥匙图标还在，只有完全退出应用才消失。这说明界面状态变了、**服务实例却没被销毁**，`stopService` 在该机型/时序下没触发 `onDestroy`。
+- 关闭改为**同进程直接调服务实例**：`teardownAll()`（关 tun、撤前台、取消通知）后 `stopSelf()`，不再依赖 `stopService` 的生命周期时序。
+- 加 1.2 秒后自检：若服务仍存活就补一次 `stopService` 兜底。
+- `onStartCommand` 收到 `intent == null`（系统重启占位）时直接停，不重建 VPN；全部返回 `START_NOT_STICKY`。
+- 「tun 还在但已停止」的中间态先 `closeTun()` 再重建；`establish()` 失败短重试两次，失败原因写入 `Stats.lastError` 并在概览页红字 + Toast 提示。
+- `onResume` 在用户刚点关闭的 3 秒内不再用 `isRunning()` 把开关拨回。
+
+### 切网后上游与界面不更新（只显示开服务那一刻的网络）
+- 根因：`registerDefaultNetworkCallback` 监听的是「默认网络」，而 VPN 建起来后默认网络就是本应用自己的 VPN，底层 WLAN / 蜂窝的切换根本收不到回调。
+- 改为 `registerNetworkCallback`：监听所有具备 `INTERNET` 能力的网络，回调里再统一过滤掉 VPN；加了 500ms 节流。
+- 每 5 秒（通知刷新那一拍）兜底重算一次上游与网络类型，即使系统没回调也能更新。
+- 概览页新增「上游」一行，直接显示「跟随系统/自定义 · 实际地址」，切网时能马上看到变化。
+
+## 0.1.2v2（测试版，未发布）
+
+修 v1 真机测试暴露的两个问题。
+
+### 关掉开关后通知栏 VPN 图标还在、再开开不了
+- 停止只保留一条路径 `stopService()`；onDestroy 统一收尾（关 tun、撤前台、cancel 通知）。v1 里 `startService(ACTION_STOP)` 在服务已不在时会把它重新拉起。
+- `onStartCommand` 收到 `intent == null`（系统按 START_STICKY 重启的占位）时不再重建 VPN，直接停掉，避免「关了又自己连上」。
+- 全部返回 `START_NOT_STICKY`。
+- 遇到「tun 还在但已经停止」的中间态：先 `closeTun()` 清理再重建，不再走 `reloadRules()` 假装开着。
+- `establish()` 失败时短重试两次（间隔 400ms），应对上一次连接刚撤销的窗口期；仍失败会把原因写进 `Stats.lastError`，概览页红字显示、并 Toast 提示。
+
+### 上游仍取到蜂窝 / 自己的 DNS
+- 根因：VPN 建立后 `activeNetwork` 就是本应用的 VPN，它的 `dnsServers` 是 `10.111.0.1`，v1 会把它当成上游 → 回环；排序又按 activeNetwork 优先，导致蜂窝网络可能排在 WLAN 前面。
+- 现在只遍历「底层网络」（排除 `TRANSPORT_VPN`），按「有线 > WLAN > 蜂窝」排序，并显式过滤 `10.111.0.1/10.111.0.2`。
+- 网络类型文案与上游取自同一份底层网络列表，不会再出现「显示 WLAN 但上游是蜂窝」的不一致。
+
+## 0.1.2v1（测试版，未发布）
+
+针对第一轮真机反馈的修复。versionCode 3，签名与 0.1.1 相同，可直接覆盖升级。
+
+### 通知栏与开关状态
+- 关开关后通知栏图标残留：`onDestroy` / `onRevoke` / `ACTION_STOP` 三条退出路径统一「撤前台 + cancel 通知」，不再只 `stopForeground(true)`。
+- 去掉 `stop()` 里 `startService(ACTION_STOP)` 与 `stopService()` 并存的竞争；服务不在时 `startService` 失败才兜底 `stopService`。
+- 状态分三态：`防护运行中`（running 且 tun 已建立）、`正在建立本地 VPN…`（开关开了但 tun 未建立）、`保护已暂停`；顶部状态 pill 与概览页同步。
+
+### 查询日志
+- 内存容量 300 → 2000；页面不再写死 `take(100)`，改为 200 条一页「加载更多」。
+- 新增「全部 / 拦截 / 放行」筛选（默认全部），切换时重置分页。
+- 域名最多两行、末尾截断而不是中间省略；点任意一条弹详情，显示完整域名（可长按选择）并可「复制域名」。
+
+### 上游 DNS 与双网络
+- 上游从「启动时取一次 activeNetwork」改为汇总所有活动网络的 IPv4 DNS：默认网络优先，其余网络兜底，过滤 loopback / anyLocal。
+- 注册 `NetworkCallback`（onAvailable / onLost / onLinkPropertiesChanged），WLAN ↔ 蜂窝切换时自动刷新上游并清空缓存。
+- 概览页显示「监听 … · 当前网络」；设置页显示当前网络类型、实际上游列表、监听方式。
+
+### TCP:53
+- `DnsPipeline` 抽出消息级 `onDnsMessage`，UDP 与 TCP 共用同一套规则、缓存、统计与 SERVFAIL 兜底。
+- 新增 `TcpDnsProxy`：最小 TCP 栈（SYN→SYN/ACK、立即 ACK、2 字节长度前缀、PSH 应答、FIN 关闭、未知连接 RST、30 秒 stale 清理、单消息上限 4096）。
+- `DnsPackets` 增加 TCP 段解析/封装与带伪头的 TCP 校验和。
+- `Resolver.queryTcp`：TCP 查询走 TCP 上游，socket 同样经过 `protect()`，不会绕回自己的 VPN。
+- 单测 16 → 20 条：新增 TCP 封装与校验和、握手→查询→应答、未知连接 RST、FIN 关闭。
+
+### 订阅更新提示
+- 修复「不管有没有变更都提示更新了一条」：`SubStore.refreshAll` 现在比较下载内容与本地文件，回调 `(有变更, 无变化, 失败)`，并带规则条数变化。
+- 概览文案：`已更新 N 条订阅` / `N 条订阅已是最新` / `无变化，M 条失败` / `更新失败，检查网络或链接`。
+- 单条更新用 Toast 提示「已更新 / 已是最新 / 失败」及当前规则条数。
+- 「订阅更新」时间只在内容真的变化时更新；`lastUpdateAll` 仍在成功拉取时更新，避免自动更新每 10 分钟重复请求。
+
+## 0.1.1
+
+修掉「未开启时概览页只剩开关」「关闭开关又自己弹回」「自动更新要等更新过一次才生效」三个问题；概览页不再显示上游 DNS。
+
+## 0.1.0
+
+首个可安装版本：VPN 形式的 DNS 过滤、订阅、自定义规则、日志、设置、缓存、通知栏常驻与「暂停防护」。

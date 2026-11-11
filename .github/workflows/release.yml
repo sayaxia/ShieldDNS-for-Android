@@ -65,8 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           gradle --no-daemon testDebugUnitTest assembleRelease \
-            -PversionName=${{ steps.ver.outputs.version }} \
-            -PversionCode=${{ steps.ver.outputs.code }}
+            -PversionName=${{ steps.ver.outputs.version }}
 
       - name: 生成发布资产
         run: |

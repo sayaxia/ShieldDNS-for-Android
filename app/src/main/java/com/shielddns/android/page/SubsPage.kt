@@ -111,13 +111,19 @@ class SubsPage(private val a: MainActivity) : Page {
 
     private fun downloadOne(s: SubEntry, label: TextView) {
         label.text = "下载中…"
-        SubStore.refreshAll(a, listOf(s), { _, _, _ -> }, { _, _ ->
+        SubStore.refreshAll(a, listOf(s), { _ -> }, { changed, unchanged, _ ->
             val all = Prefs.loadSubs().map { if (it.id == s.id) s else it }
             Prefs.saveSubs(all)
             a.runOnUiThread {
                 lastKey = ""
                 a.reloadService()
                 refresh()
+                val msg = when {
+                    changed > 0 -> "「${s.name}」已更新，共 ${s.count} 条规则"
+                    unchanged > 0 -> "「${s.name}」已是最新，共 ${s.count} 条规则"
+                    else -> "「${s.name}」更新失败，检查网络或链接"
+                }
+                android.widget.Toast.makeText(a, msg, android.widget.Toast.LENGTH_SHORT).show()
             }
         })
     }

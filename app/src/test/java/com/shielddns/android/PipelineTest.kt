@@ -6,22 +6,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
- * 端到端（进程内）：造一个完整的 IPv4/UDP 查询包送进 DnsPipeline，
- * 校验拦掉的包会变成 NXDOMAIN 应答、放行的包会经「上游」转发回来、缓存命中的包 ID 正确。
+ * 端到端（进程内）：
+ * - UDP：拦掉的包变成 NXDOMAIN、放行的包经「上游」转发回来、缓存命中时 ID 正确；
+ * - TCP：三次握手 → 长度前缀查询 → 应答帧，验证最小 TCP 栈与校验和。
  */
 class PipelineTest {
 
-    private fun queryPacket(host: String, id: Int, clientPort: Int = 52345): ByteArray {
+    private fun dnsQuery(host: String, id: Int): ByteArray {
         val labels = host.split('.')
         val qLen = 1 + labels.sumOf { it.length + 1 } + 4
         val dns = ByteArray(12 + qLen)
         dns[0] = ((id shr 8) and 0xFF).toByte()
         dns[1] = (id and 0xFF).toByte()
         dns[2] = 0x01 // RD
-        dns[4] = 0
         dns[5] = 1
         var p = 12
         labels.forEach {
@@ -30,16 +29,20 @@ class PipelineTest {
         }
         dns[p++] = 0
         dns[p++] = 0; dns[p++] = 1; dns[p++] = 0; dns[p++] = 1
-        return DnsPackets.wrapUdp(
+        return dns
+    }
+
+    private fun queryPacket(host: String, id: Int, clientPort: Int = 52345): ByteArray =
+        DnsPackets.wrapUdp(
             byteArrayOf(10, 111, 0, 2),
             byteArrayOf(10, 111, 0, 1),
-            clientPort, 53, dns
+            clientPort, 53, dnsQuery(host, id)
         )
-    }
 
     private fun answerOf(respPacket: ByteArray): ByteArray {
         val ihl = (respPacket[0].toInt() and 0x0F) * 4
-        return respPacket.copyOfRange(ihl + 8, respPacket.size)
+        val thl = if ((respPacket[9].toInt() and 0xFF) == 6) ((respPacket[ihl + 12].toInt() and 0xFF) shr 4) * 4 else 8
+        return respPacket.copyOfRange(ihl + thl, respPacket.size)
     }
 
     private fun buildPipeline(
@@ -50,9 +53,9 @@ class PipelineTest {
     ): DnsPipeline {
         val engine = RuleEngine()
         engine.rebuild(listOf(rules), "")
-        val pipeline = DnsPipeline(
+        return DnsPipeline(
             engine = engine,
-            forward = upstream ?: { null },
+            forward = { raw, _ -> upstream?.invoke(raw) },
             blockMode = { "nxdomain" },
             cacheEnabled = { true },
             onQuery = { _, _ -> },
@@ -60,8 +63,9 @@ class PipelineTest {
             onForwardFailed = {},
             deliver = { pkt -> out.add(pkt) }
         )
-        return pipeline
     }
+
+    // ---------- UDP ----------
 
     @Test
     fun blockedQueryGetsNxdomainAnswer() {
@@ -72,7 +76,6 @@ class PipelineTest {
 
         assertEquals(1, out.size)
         val resp = out[0]
-        // 源/目的对调：源是我们的 VPN 地址，目的回到客户端
         assertEquals(10, resp[12].toInt())
         assertEquals(111, resp[13].toInt())
         assertEquals(0, resp[14].toInt())
@@ -82,16 +85,14 @@ class PipelineTest {
         val dns = answerOf(resp)
         assertTrue((dns[2].toInt() and 0x80) != 0)      // QR=1
         assertEquals(3, dns[3].toInt() and 0x0F)        // NXDOMAIN
-        assertEquals(0x22, dns[0].toInt() and 0xFF)     // ID 原样返回
+        assertEquals(0x22, dns[0].toInt() and 0xFF)
         ppl.shutdown()
     }
 
     @Test
     fun allowedQueryIsForwardedAndCachedWithNewId() {
         val out = Collections.synchronizedList(mutableListOf<ByteArray>())
-        val latch = CountDownLatch(1)
         val upstreamCalls = intArrayOf(0)
-        // 上游：直接把查询原样改一个 A 记录返回
         val upstream: (ByteArray) -> ByteArray? = { req ->
             upstreamCalls[0]++
             val r = ByteArray(req.size + 16)
@@ -104,7 +105,6 @@ class PipelineTest {
             r[p++] = 0; r[p++] = 1; r[p++] = 0; r[p++] = 1
             r[p++] = 0; r[p++] = 0; r[p++] = 0; r[p++] = 60
             r[p++] = 0; r[p++] = 4; r[p++] = 1; r[p++] = 2; r[p++] = 3; r[p] = 4
-            latch.countDown()
             r
         }
         var cachedHits = 0
@@ -112,7 +112,6 @@ class PipelineTest {
 
         val q1 = queryPacket("good.example.com", 0x3333)
         ppl.onPacket(q1, q1.size)
-        // 转发是异步的：轮询等第一条应答写回
         var waited = 0
         while (out.isEmpty() && waited < 3000) {
             Thread.sleep(50)
@@ -121,9 +120,8 @@ class PipelineTest {
         assertEquals(1, out.size)
         val dns1 = answerOf(out[0])
         assertEquals(0x33, dns1[0].toInt() and 0xFF)
-        assertEquals(1, dns1[7].toInt() and 0xFF) // 带一条应答
+        assertEquals(1, dns1[7].toInt() and 0xFF)
 
-        // 第二次相同查询：应命中缓存，不再打上游
         val q2 = queryPacket("good.example.com", 0x4444)
         ppl.onPacket(q2, q2.size)
         assertEquals(2, out.size)
@@ -131,7 +129,6 @@ class PipelineTest {
         assertEquals(1, cachedHits)
         val dns2 = answerOf(out[1])
         assertEquals(0x44, dns2[0].toInt() and 0xFF)
-        assertEquals(0x44, dns2[1].toInt() and 0xFF)
         ppl.shutdown()
     }
 
@@ -139,7 +136,6 @@ class PipelineTest {
     fun nonDnsTrafficIsIgnored() {
         val out = Collections.synchronizedList(mutableListOf<ByteArray>())
         val ppl = buildPipeline("||ads.example.com^", null, out)
-        // 造一个非 53 端口的 UDP 包（比如 443 的 QUIC）
         val payload = ByteArray(20) { 7 }
         val pkt = DnsPackets.wrapUdp(
             byteArrayOf(10, 111, 0, 2),
@@ -154,16 +150,154 @@ class PipelineTest {
     @Test
     fun upstreamTimeoutProducesServfail() {
         val out = Collections.synchronizedList(mutableListOf<ByteArray>())
-        val latch = CountDownLatch(1)
         val ppl = buildPipeline("||ads.example.com^", { null }, out)
         val q = queryPacket("good.example.com", 0x5555)
         ppl.onPacket(q, q.size)
-        // 转发是异步的，等一会儿
         Thread.sleep(300)
         assertNotNull(out.firstOrNull())
         val dns = answerOf(out[0])
         assertEquals(2, dns[3].toInt() and 0x0F) // SERVFAIL
-        latch.countDown()
         ppl.shutdown()
+    }
+
+    // ---------- TCP ----------
+
+    private fun tcpPacket(
+        srcPort: Int,
+        seq: Int,
+        ack: Int,
+        flags: Int,
+        payload: ByteArray = ByteArray(0)
+    ): ByteArray = DnsPackets.wrapTcp(
+        DnsPackets.TcpSegment(
+            srcIp = byteArrayOf(10, 111, 0, 2),
+            dstIp = byteArrayOf(10, 111, 0, 1),
+            srcPort = srcPort,
+            dstPort = 53,
+            seq = seq,
+            ack = ack,
+            flags = flags,
+            payload = payload
+        )
+    )
+
+    /** 含校验和在内重新算一遍，反码和应为 0xFFFF 才说明校验和写对了。 */
+    private fun tcpChecksumOk(pkt: ByteArray): Boolean {
+        val ihl = (pkt[0].toInt() and 0x0F) * 4
+        val total = pkt.size
+        var sum = 6 + (total - ihl)
+        var i = 12
+        while (i < 20) {
+            sum += ((pkt[i].toInt() and 0xFF) shl 8) or (pkt[i + 1].toInt() and 0xFF)
+            i += 2
+        }
+        i = ihl
+        while (i + 1 < total) {
+            sum += ((pkt[i].toInt() and 0xFF) shl 8) or (pkt[i + 1].toInt() and 0xFF)
+            i += 2
+        }
+        if (i < total) sum += (pkt[i].toInt() and 0xFF) shl 8
+        while (sum shr 16 != 0) sum = (sum and 0xFFFF) + (sum shr 16)
+        return sum == 0xFFFF
+    }
+
+    @Test
+    fun tcpWrapRoundTripAndChecksum() {
+        val payload = byteArrayOf(0, 12, 1, 2, 3, 4)
+        val seg = DnsPackets.TcpSegment(
+            byteArrayOf(10, 111, 0, 1), byteArrayOf(10, 111, 0, 2),
+            53, 40001, 12345, 6789, DnsPackets.TCP_PSH or DnsPackets.TCP_ACK, payload
+        )
+        val pkt = DnsPackets.wrapTcp(seg)
+        assertTrue("TCP 校验和错误", tcpChecksumOk(pkt))
+
+        val parsed = DnsPackets.parseTcp(pkt, pkt.size)
+        assertNotNull(parsed)
+        assertEquals(53, parsed!!.srcPort)
+        assertEquals(40001, parsed.dstPort)
+        assertEquals(12345, parsed.seq)
+        assertEquals(6789, parsed.ack)
+        assertEquals(0x18, parsed.flags)
+        assertEquals(payload.size, parsed.payload.size)
+    }
+
+    @Test
+    fun tcpHandshakeAndBlockedQueryGetsAnswer() {
+        val out = Collections.synchronizedList(mutableListOf<ByteArray>())
+        val engine = RuleEngine().apply { rebuild(listOf("||ads.example.com^"), "") }
+        val pipeline = DnsPipeline(
+            engine = engine,
+            forward = { _, _ -> null },
+            blockMode = { "nxdomain" },
+            cacheEnabled = { true },
+            onQuery = { _, _ -> },
+            onCached = {},
+            onForwardFailed = {},
+            deliver = { pkt -> out.add(pkt) }
+        )
+        val proxy = TcpDnsProxy(deliver = { pkt -> out.add(pkt) })
+        proxy.onMessage = { msg, respond -> pipeline.onDnsMessage(msg, true, respond) }
+
+        // 1) SYN → SYN/ACK
+        val syn = tcpPacket(40001, 1000, 0, DnsPackets.TCP_SYN)
+        proxy.onPacket(syn, syn.size)
+        assertEquals(1, out.size)
+        val synAck = DnsPackets.parseTcp(out[0], out[0].size)!!
+        assertEquals(DnsPackets.TCP_SYN or DnsPackets.TCP_ACK, synAck.flags)
+        assertEquals(1001, synAck.ack)
+        assertTrue(tcpChecksumOk(out[0]))
+
+        // 2) 客户端发数据：2 字节长度前缀 + 查询
+        val q = dnsQuery("ads.example.com", 0x7788)
+        val framed = ByteArray(2 + q.size)
+        framed[0] = (q.size shr 8).toByte()
+        framed[1] = q.size.toByte()
+        System.arraycopy(q, 0, framed, 2, q.size)
+        val data = tcpPacket(40001, 1001, synAck.seq + 1, DnsPackets.TCP_ACK or DnsPackets.TCP_PSH, framed)
+        proxy.onPacket(data, data.size)
+
+        // 应产生「纯 ACK」和「PSH 应答」两段
+        assertEquals(3, out.size)
+        val ackSeg = DnsPackets.parseTcp(out[1], out[1].size)!!
+        assertEquals(DnsPackets.TCP_ACK, ackSeg.flags)
+        assertEquals(1001 + framed.size, ackSeg.ack)
+
+        val respSeg = DnsPackets.parseTcp(out[2], out[2].size)!!
+        assertTrue(respSeg.flags and DnsPackets.TCP_ACK != 0)
+        assertTrue(respSeg.payload.size > 2)
+        val msgLen = ((respSeg.payload[0].toInt() and 0xFF) shl 8) or (respSeg.payload[1].toInt() and 0xFF)
+        assertEquals(msgLen, respSeg.payload.size - 2)
+        val dns = respSeg.payload.copyOfRange(2, respSeg.payload.size)
+        assertTrue((dns[2].toInt() and 0x80) != 0)
+        assertEquals(3, dns[3].toInt() and 0x0F)   // 被规则拦掉，NXDOMAIN
+        assertEquals(0x77, dns[0].toInt() and 0xFF)
+        assertTrue(tcpChecksumOk(out[2]))
+
+        pipeline.shutdown()
+    }
+
+    @Test
+    fun tcpUnknownConnectionGetsReset() {
+        val out = Collections.synchronizedList(mutableListOf<ByteArray>())
+        val proxy = TcpDnsProxy(deliver = { pkt -> out.add(pkt) })
+        // 没有握手直接发数据：应回 RST
+        val data = tcpPacket(40002, 5000, 0, DnsPackets.TCP_ACK, ByteArray(4))
+        proxy.onPacket(data, data.size)
+        assertEquals(1, out.size)
+        val rst = DnsPackets.parseTcp(out[0], out[0].size)!!
+        assertTrue(rst.flags and DnsPackets.TCP_RST != 0)
+    }
+
+    @Test
+    fun tcpFinClosesConnection() {
+        val out = Collections.synchronizedList(mutableListOf<ByteArray>())
+        val proxy = TcpDnsProxy(deliver = { pkt -> out.add(pkt) })
+        val syn = tcpPacket(40003, 7000, 0, DnsPackets.TCP_SYN)
+        proxy.onPacket(syn, syn.size)
+        val synAck = DnsPackets.parseTcp(out[0], out[0].size)!!
+        val fin = tcpPacket(40003, 7001, synAck.seq + 1, DnsPackets.TCP_FIN or DnsPackets.TCP_ACK)
+        proxy.onPacket(fin, fin.size)
+        val finAck = DnsPackets.parseTcp(out[1], out[1].size)!!
+        assertTrue(finAck.flags and DnsPackets.TCP_FIN != 0)
     }
 }

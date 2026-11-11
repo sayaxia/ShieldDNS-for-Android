@@ -68,7 +68,7 @@ class SettingsPage(private val a: MainActivity) : Page {
             Prefs.upstreamMode = if (custom) "custom" else "system"
         }
         customInput.doAfterTextChanged { Prefs.customUpstream = it?.toString()?.trim() ?: "" }
-        upCard.addView(Ui.text(a, "上游只支持 IPv4 的 UDP 53；自定义时用逗号分隔多个地址，前一个超时自动换下一个。", 11.5f, Ui.MUTED).apply {
+        upCard.addView(Ui.text(a, "跟随系统时汇总当前所有活动网络（WLAN / 蜂窝）下发的 IPv4 DNS，默认网络优先，其余兜底；切网时自动刷新。自定义时用逗号分隔多个地址，前一个超时自动换下一个；UDP 与 TCP 查询都会走同一组上游。", 11.5f, Ui.MUTED).apply {
             setPadding(0, Ui.dp(a, 8), 0, 0)
         })
         column.addView(upCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
@@ -152,6 +152,11 @@ class SettingsPage(private val a: MainActivity) : Page {
 
     override fun refresh() {
         val mode = if (Prefs.upstreamMode == "custom") "自定义上游" else "跟随系统"
-        stateText.text = "上游：$mode · ${Stats.upstreamText}\n缓存：${if (Prefs.cacheEnabled) "开" else "关"} · 生效规则 ${Stats.rules} 条"
+        stateText.text = buildString {
+            append("当前网络：${Stats.networkText}\n")
+            append("上游：$mode · ${Stats.upstreamText}\n")
+            append("监听：${Stats.listenText}\n")
+            append("缓存：${if (Prefs.cacheEnabled) "开" else "关"} · 生效规则 ${Stats.rules} 条")
+        }
     }
 }

@@ -6,11 +6,12 @@ import java.util.concurrent.Executors
 
 /**
  * 纯逻辑的 DNS 处理管线（不碰 Android API，方便单测）：
- * 输入一个 IPv4/UDP 报文 → 判规则 / 查缓存 / 转发上游 → 输出一个 IPv4/UDP 应答包。
+ * 核心是消息级的 onDnsMessage，UDP 与 TCP 共用同一套规则、缓存和统计。
+ * UDP 入口负责解 IPv4/UDP 包并把应答封回去；TCP 由 TcpDnsProxy 负责封装。
  */
 class DnsPipeline(
     private val engine: RuleEngine,
-    private val forward: (ByteArray) -> ByteArray?,
+    private val forward: (ByteArray, Boolean) -> ByteArray?,
     private val blockMode: () -> String,
     private val cacheEnabled: () -> Boolean,
     private val onQuery: (String, Boolean) -> Unit,
@@ -28,7 +29,7 @@ class DnsPipeline(
 
     fun shutdown() = pool.shutdownNow()
 
-    /** 处理一个进入 tun 的报文；不是 UDP:53 的话直接忽略。 */
+    /** 处理一个进入 tun 的 UDP 报文；不是 UDP:53 的话直接忽略。 */
     fun onPacket(buf: ByteArray, len: Int) {
         if (len < 28) return
         if ((buf[0].toInt() shr 4) and 0x0F != 4) return
@@ -49,15 +50,26 @@ class DnsPipeline(
         val payloadLen = ipTotal - off
         if (payloadLen < 12) return
 
-        val q = DnsPackets.parseQuery(buf, off, payloadLen) ?: return
-        val qtype = ((buf[q.questionEnd - 4].toInt() and 0xFF) shl 8) or
-            (buf[q.questionEnd - 3].toInt() and 0xFF)
+        val query = buf.copyOfRange(off, off + payloadLen)
+        onDnsMessage(query) { resp ->
+            deliver(DnsPackets.wrapUdp(dstIp, srcIp, 53, srcPort, resp))
+        }
+    }
+
+    /**
+     * 消息级处理：一条完整的 DNS 查询消息进，应答通过 respond 交出去。
+     * @param viaTcp 查询是从 TCP:53 进来的，上游也必须用 TCP 转发。
+     * respond 可能在后台线程被调用，调用方要保证自己的写出是线程安全的。
+     */
+    fun onDnsMessage(query: ByteArray, viaTcp: Boolean = false, respond: (ByteArray) -> Unit) {
+        val q = DnsPackets.parseQuery(query, 0, query.size) ?: return
+        val qtype = ((query[q.questionEnd - 4].toInt() and 0xFF) shl 8) or
+            (query[q.questionEnd - 3].toInt() and 0xFF)
         val key = "${q.name}|$qtype"
 
         if (engine.isBlocked(q.name)) {
             val zero = blockMode() == "zero"
-            val resp = DnsPackets.buildResponse(buf, off, q.questionEnd, if (zero) 0 else 3, zero)
-            deliver(DnsPackets.wrapUdp(dstIp, srcIp, 53, srcPort, resp))
+            respond(DnsPackets.buildResponse(query, 0, q.questionEnd, if (zero) 0 else 3, zero))
             onQuery(q.name, true)
             return
         }
@@ -66,8 +78,7 @@ class DnsPipeline(
             val hit = cache[key]
             if (hit != null && hit.expires > System.currentTimeMillis()) {
                 // 缓存里是某一次的应答，ID 必须换成这次的，否则客户端丢弃
-                val payload = DnsPackets.adoptId(hit.payload, buf, off)
-                deliver(DnsPackets.wrapUdp(dstIp, srcIp, 53, srcPort, payload))
+                respond(DnsPackets.adoptId(hit.payload, query, 0))
                 onCached()
                 onQuery(q.name, false)
                 return
@@ -75,20 +86,18 @@ class DnsPipeline(
         }
 
         onQuery(q.name, false)
-        val raw = buf.copyOfRange(off, off + payloadLen)
         pool.execute {
-            val resp = forward(raw)
+            val resp = forward(query, viaTcp)
             if (resp == null) {
                 onForwardFailed()
-                val failResp = DnsPackets.buildResponse(buf, off, q.questionEnd, 2, false)
-                deliver(DnsPackets.wrapUdp(dstIp, srcIp, 53, srcPort, failResp))
+                respond(DnsPackets.buildResponse(query, 0, q.questionEnd, 2, false))
             } else {
                 if (cacheEnabled()) {
                     val ttl = DnsPackets.minTtl(resp).coerceIn(30, 3600)
                     if (cache.size > 6000) cache.clear()
                     cache[key] = Entry(resp, System.currentTimeMillis() + ttl * 1000L)
                 }
-                deliver(DnsPackets.wrapUdp(dstIp, srcIp, 53, srcPort, resp))
+                respond(resp)
             }
         }
     }

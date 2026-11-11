@@ -11,6 +11,9 @@ data class LogEntry(val time: Long, val host: String, val blocked: Boolean)
 /** 运行期状态：进程内共享，UI 每秒拉一次即可。 */
 object Stats {
 
+    /** 日志在内存里最多留这么多条；页面按需分页展示，不再一刀切只看 100 条。 */
+    const val MAX_LOG = 2000
+
     val total = AtomicLong(0)
     val blocked = AtomicLong(0)
     val cached = AtomicLong(0)
@@ -18,6 +21,10 @@ object Stats {
 
     @Volatile
     var running: Boolean = false
+
+    /** tun 是否真的建立成功。UI 用它区分「开关开着但 VPN 没起来」。 */
+    @Volatile
+    var vpnUp: Boolean = false
 
     @Volatile
     var startedAt: Long = 0L
@@ -27,6 +34,10 @@ object Stats {
 
     @Volatile
     var upstreamText: String = "未获取"
+
+    /** 当前默认网络类型：WLAN / 蜂窝 / WLAN+蜂窝 */
+    @Volatile
+    var networkText: String = "—"
 
     @Volatile
     var lastError: String = ""
@@ -53,7 +64,7 @@ object Stats {
         total.incrementAndGet()
         if (isBlocked) blocked.incrementAndGet()
         recent.addFirst(LogEntry(System.currentTimeMillis(), host, isBlocked))
-        while (recent.size > 300) recent.pollLast()
+        while (recent.size > MAX_LOG) recent.pollLast()
     }
 
     fun snapshot(): List<LogEntry> = recent.toList()

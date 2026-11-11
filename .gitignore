@@ -16,6 +16,7 @@ signing.properties
 truststore.jks
 
 # 构建产物
+dist/
 *.apk
 *.aab
 *.zip

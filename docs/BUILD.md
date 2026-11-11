@@ -79,13 +79,13 @@ keyPassword=<keypass>
 2. 该沙箱 `sdkmanager` 不可用（`HTTP_PROXY`/`HTTPS_PROXY` 为空时 URL 解析失败），SDK 是手工解包安装的；换机器用标准 sdkmanager 即可。
 3. Robolectric 首次运行需要下载 `android-all`，离线环境会失败，需预先热好 Gradle 缓存。
 
-## 测试构成（16 条）
+## 测试构成（20 条）
 
 | 文件 | 条数 | 覆盖 |
 | --- | --- | --- |
 | `CoreTest.kt` | 8 | 规则语法、空规则、报文解析与应答构造、UDP 封装、缓存换 ID、订阅条数 |
-| `PipelineTest.kt` | 4 | 端到端管线：拦截→NXDOMAIN、放行→A 记录、二次查询命中缓存且换 ID、非 53 端口忽略 |
+| `PipelineTest.kt` | 8 | 端到端管线：拦截→NXDOMAIN、放行→A 记录、二次查询命中缓存且换 ID、非 53 端口忽略；TCP 段封装/解析与校验和、握手→查询→应答、未知连接回 RST、FIN 关闭 |
 | `ResolverTest.kt` | 1 | 本地假上游的转发链路 |
 | `UiTest.kt` | 3 | Robolectric 拉起 MainActivity 的真实测量断言 |
 
-`ResolverTest` 的转发测试和 `PipelineTest` 的超时用例合计 13 条非界面测试，另外 3 条是 Robolectric；**16 是总数，不要把端到端 4 条重复计进去**。
+`ResolverTest` 的转发测试和 `PipelineTest` 的用例合计 17 条非界面测试，另外 3 条是 Robolectric；**20 是总数，不要把端到端用例重复计进去**。

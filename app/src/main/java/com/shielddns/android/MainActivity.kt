@@ -148,7 +148,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        Stats.running = DnsVpnService.isRunning()
+        // 刚点过「关闭」的 3 秒内不要用 isRunning() 把开关拨回去；
+        // 服务真正停下来后 isRunning() 自然为 false，不必抢这一拍。
+        if (System.currentTimeMillis() - DnsVpnService.lastStopAt > 3000) {
+            Stats.running = DnsVpnService.isRunning()
+        }
         ticker.post(object : Runnable {
             override fun run() {
                 updateHeader()
@@ -164,14 +168,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateHeader() {
-        if (Stats.running) {
-            statusPill.text = "防护运行中"
-            statusPill.setTextColor(Ui.ACCENT)
-            statusPill.background = Ui.rounded(Ui.adjustAlpha(Ui.ACCENT, 0.14f), 10, Ui.adjustAlpha(Ui.ACCENT, 0.45f), 1, this)
-        } else {
-            statusPill.text = "保护已暂停"
-            statusPill.setTextColor(Ui.MUTED)
-            statusPill.background = Ui.rounded(0x00000000, 10, 0xFF2B3D34.toInt(), 1, this)
+        when {
+            Stats.running && Stats.vpnUp -> {
+                statusPill.text = "防护运行中"
+                statusPill.setTextColor(Ui.ACCENT)
+                statusPill.background = Ui.rounded(Ui.adjustAlpha(Ui.ACCENT, 0.14f), 10, Ui.adjustAlpha(Ui.ACCENT, 0.45f), 1, this)
+            }
+            Stats.running -> {
+                // 开关已开但 tun 还没建立：明确显示中间态，不要让人以为已经在防护
+                statusPill.text = "正在建立 VPN…"
+                statusPill.setTextColor(Ui.WARN)
+                statusPill.background = Ui.rounded(Ui.adjustAlpha(Ui.WARN, 0.14f), 10, Ui.adjustAlpha(Ui.WARN, 0.45f), 1, this)
+            }
+            else -> {
+                statusPill.text = "保护已暂停"
+                statusPill.setTextColor(Ui.MUTED)
+                statusPill.background = Ui.rounded(0x00000000, 10, 0xFF2B3D34.toInt(), 1, this)
+            }
         }
     }
 
@@ -193,6 +206,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchService() {
         ContextCompat.startForegroundService(this, DnsVpnService.startIntent(this))
+        // 1.8 秒后若还没真正跑起来，把失败原因直接告诉用户，而不是让开关默默弹回去
+        ticker.postDelayed({
+            if (!DnsVpnService.isRunning() && Stats.lastError.isNotEmpty()) {
+                android.widget.Toast.makeText(this, Stats.lastError, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }, 1800)
     }
 
     fun reloadService() {

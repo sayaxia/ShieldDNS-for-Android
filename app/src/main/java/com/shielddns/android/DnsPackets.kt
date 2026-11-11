@@ -186,6 +186,120 @@ object DnsPackets {
 
     fun ipToBytes(ip: InetAddress): ByteArray = ip.address
 
+    // ---------- TCP:53 ----------
+
+    const val TCP_FIN = 0x01
+    const val TCP_SYN = 0x02
+    const val TCP_RST = 0x04
+    const val TCP_PSH = 0x08
+    const val TCP_ACK = 0x10
+
+    data class TcpSegment(
+        val srcIp: ByteArray,
+        val dstIp: ByteArray,
+        val srcPort: Int,
+        val dstPort: Int,
+        val seq: Int,
+        val ack: Int,
+        val flags: Int,
+        val payload: ByteArray
+    )
+
+    /** 解析 IPv4 + TCP；不是 TCP 或长度不够返回 null。 */
+    fun parseTcp(buf: ByteArray, len: Int): TcpSegment? {
+        if (len < 40) return null
+        if ((buf[0].toInt() shr 4) and 0x0F != 4) return null
+        val ihl = (buf[0].toInt() and 0x0F) * 4
+        if (ihl < 20 || len < ihl + 20) return null
+        if ((buf[9].toInt() and 0xFF) != 6) return null
+        var total = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
+        if (total > len) total = len
+        val thl = ((buf[ihl + 12].toInt() and 0xFF) shr 4) * 4
+        if (thl < 20 || ihl + thl > total) return null
+
+        val seq = readInt(buf, ihl + 4)
+        val ack = readInt(buf, ihl + 8)
+        val flags = buf[ihl + 13].toInt() and 0xFF
+        val payloadOff = ihl + thl
+        return TcpSegment(
+            srcIp = buf.copyOfRange(12, 16),
+            dstIp = buf.copyOfRange(16, 20),
+            srcPort = ((buf[ihl].toInt() and 0xFF) shl 8) or (buf[ihl + 1].toInt() and 0xFF),
+            dstPort = ((buf[ihl + 2].toInt() and 0xFF) shl 8) or (buf[ihl + 3].toInt() and 0xFF),
+            seq = seq,
+            ack = ack,
+            flags = flags,
+            payload = if (payloadOff < total) buf.copyOfRange(payloadOff, total) else ByteArray(0)
+        )
+    }
+
+    private fun readInt(d: ByteArray, p: Int): Int =
+        ((d[p].toInt() and 0xFF) shl 24) or ((d[p + 1].toInt() and 0xFF) shl 16) or
+            ((d[p + 2].toInt() and 0xFF) shl 8) or (d[p + 3].toInt() and 0xFF)
+
+    private fun writeInt(d: ByteArray, p: Int, v: Int) {
+        d[p] = (v shr 24).toByte()
+        d[p + 1] = (v shr 16).toByte()
+        d[p + 2] = (v shr 8).toByte()
+        d[p + 3] = v.toByte()
+    }
+
+    /** 把 DNS 负载包成 IPv4 + TCP 段（VpnService 里应答客户端时用）。 */
+    fun wrapTcp(seg: TcpSegment): ByteArray {
+        val tcpLen = 20 + seg.payload.size
+        val total = 20 + tcpLen
+        val p = ByteArray(total)
+        p[0] = 0x45
+        p[2] = (total shr 8).toByte()
+        p[3] = total.toByte()
+        p[6] = 0x40
+        p[8] = 64
+        p[9] = 6
+        System.arraycopy(seg.srcIp, 0, p, 12, 4)
+        System.arraycopy(seg.dstIp, 0, p, 16, 4)
+        val ipck = checksum(p, 0, 20, 0)
+        p[10] = (ipck shr 8).toByte()
+        p[11] = ipck.toByte()
+
+        p[20] = (seg.srcPort shr 8).toByte()
+        p[21] = seg.srcPort.toByte()
+        p[22] = (seg.dstPort shr 8).toByte()
+        p[23] = seg.dstPort.toByte()
+        writeInt(p, 24, seg.seq)
+        writeInt(p, 28, seg.ack)
+        p[32] = 0x50 // data offset = 5 (20 字节)
+        p[33] = seg.flags.toByte()
+        p[34] = 0xFF.toByte()
+        p[35] = 0xFF.toByte() // window 65535
+        System.arraycopy(seg.payload, 0, p, 40, seg.payload.size)
+
+        // TCP 校验和：伪头（源/目的 IP、协议号、TCP 长度）+ TCP 段
+        var seed = 6 + tcpLen
+        var i = 12
+        while (i < 20) {
+            seed += ((p[i].toInt() and 0xFF) shl 8) or (p[i + 1].toInt() and 0xFF)
+            i += 2
+        }
+        while (seed shr 16 != 0) seed = (seed and 0xFFFF) + (seed shr 16)
+        val tck = checksum(p, 20, total, seed)
+        p[36] = (tck shr 8).toByte()
+        p[37] = tck.toByte()
+        return p
+    }
+
+    /** 一段数据的 16 位反码和；start 到 end 是半开区间。 */
+    private fun checksum(data: ByteArray, start: Int, end: Int, seed: Int): Int {
+        var sum = seed
+        var i = start
+        while (i + 1 < end) {
+            sum += ((data[i].toInt() and 0xFF) shl 8) or (data[i + 1].toInt() and 0xFF)
+            i += 2
+        }
+        if (i < end) sum += (data[i].toInt() and 0xFF) shl 8
+        while (sum shr 16 != 0) sum = (sum and 0xFFFF) + (sum shr 16)
+        return sum.inv() and 0xFFFF
+    }
+
     /** 复用缓存应答时把旧的事务 ID 换成这次查询的 ID，否则客户端会丢弃它。 */
     fun adoptId(payload: ByteArray, query: ByteArray, queryOffset: Int): ByteArray {
         val out = payload.copyOf()
