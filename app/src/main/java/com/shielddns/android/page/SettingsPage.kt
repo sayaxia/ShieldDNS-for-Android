@@ -15,6 +15,7 @@ import com.shielddns.android.Page
 import com.shielddns.android.Prefs
 import com.shielddns.android.Stats
 import com.shielddns.android.Ui
+import com.shielddns.android.UpdateChecker
 
 /** 设置：上游、拦截响应、缓存、自动更新、关于。 */
 class SettingsPage(private val a: MainActivity) : Page {
@@ -25,6 +26,9 @@ class SettingsPage(private val a: MainActivity) : Page {
     override val view: View
     private val customInput: EditText
     private val stateText: TextView
+    private val updateStatus: TextView
+    private val updateBtn: TextView
+    private var pending: UpdateChecker.Latest? = null
 
     init {
         val scroll = ScrollView(a)
@@ -116,6 +120,18 @@ class SettingsPage(private val a: MainActivity) : Page {
             11.5f, Ui.MUTED
         ).apply { setPadding(0, Ui.dp(a, 8), 0, Ui.dp(a, 12)) })
 
+        // ---- 检查更新（GitHub Release） ----
+        updateStatus = Ui.text(a, "检查 GitHub Release 上的最新版本，有新版可直接下载并安装。", 11.5f, Ui.MUTED).apply {
+            setPadding(0, Ui.dp(a, 12), 0, 0)
+        }
+        about.addView(updateStatus)
+        updateBtn = Ui.button(a, "检查更新", primary = false)
+        updateBtn.setOnClickListener {
+            val ready = pending
+            if (ready != null) startDownload(ready) else checkUpdate()
+        }
+        about.addView(updateBtn, Ui.lpMatch().apply { topMargin = Ui.dp(a, 8) })
+
         stateText = Ui.text(a, "", 11.5f, Ui.MUTED)
         about.addView(stateText)
 
@@ -148,6 +164,71 @@ class SettingsPage(private val a: MainActivity) : Page {
         sw.setOnCheckedChangeListener { _, checked -> onChange(checked) }
         row.addView(sw)
         return row
+    }
+
+    private fun checkUpdate() {
+        val current = com.shielddns.android.BuildConfig.VERSION_NAME
+        updateBtn.isEnabled = false
+        updateBtn.text = "检查中…"
+        updateStatus.text = "正在检查…"
+        val t = Thread {
+            val res = runCatching { UpdateChecker.fetchLatest() }
+            a.runOnUiThread {
+                updateBtn.isEnabled = true
+                res.onSuccess { latest ->
+                    if (UpdateChecker.isNewer(latest.version, current)) {
+                        pending = latest
+                        updateStatus.text = "发现新版本 v${latest.version}（当前 v$current）"
+                        updateBtn.text = "下载并安装 v${latest.version}"
+                    } else {
+                        pending = null
+                        updateStatus.text = "已是最新版本（v$current）"
+                        updateBtn.text = "重新检查"
+                    }
+                }
+                res.onFailure {
+                    pending = null
+                    updateStatus.text = "检查失败：${it.message ?: "未知错误"}"
+                    updateBtn.text = "重新检查"
+                }
+            }
+        }
+        t.isDaemon = true
+        t.start()
+    }
+
+    private fun startDownload(latest: UpdateChecker.Latest) {
+        updateBtn.isEnabled = false
+        updateBtn.text = "准备下载…"
+        updateStatus.text = "开始下载 v${latest.version}…"
+        val t = Thread {
+            val res = runCatching {
+                UpdateChecker.download(a, latest) { pct ->
+                    a.runOnUiThread {
+                        updateBtn.text = "正在下载 $pct%"
+                        updateStatus.text = "正在下载 v${latest.version} · $pct%"
+                    }
+                }
+            }
+            a.runOnUiThread {
+                updateBtn.isEnabled = true
+                res.onSuccess { apk ->
+                    updateStatus.text = "下载完成，正在打开系统安装器…"
+                    updateBtn.text = "重新检查"
+                    pending = null
+                    val opened = runCatching { UpdateChecker.install(a, apk) }
+                    opened.onFailure {
+                        updateStatus.text = "打不开安装器：${it.message}。请到系统设置里允许本应用「安装未知应用」。"
+                    }
+                }
+                res.onFailure {
+                    updateBtn.text = "下载并安装 v${latest.version}"
+                    updateStatus.text = "下载失败：${it.message ?: "未知错误"}"
+                }
+            }
+        }
+        t.isDaemon = true
+        t.start()
     }
 
     override fun refresh() {

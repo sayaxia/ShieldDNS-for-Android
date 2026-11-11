@@ -1,5 +1,14 @@
 # 变更记录
 
+## 0.1.3（正式版，2026-11-11）
+
+### 新增：检查更新与自升级
+- 设置页「关于」新增「检查更新」：读 GitHub Release 的 latest，比较 `tag_name` 与本地 versionName（`v0.1.2`、`0.1.2v3`、`0.1.2-beta` 都归一成数值段比较）。
+- 有新版时按钮变为「下载并安装 vX.Y.Z」：下载到 `cacheDir/updates`，边下边显示百分比，完成后按发布页附带的 `.sha256` 校验，校验不过直接删包，不会把坏包交给安装器。
+- 通过 `FileProvider` 以 `content://` 交给系统安装器（Android 7+ 不允许 `file://` 外露）；新增 `REQUEST_INSTALL_PACKAGES` 权限，首次安装会由系统引导允许「安装未知应用」。
+- 网络失败、HTTP 403 限流、发布页缺 APK 等情况都会把原因显示在按钮上方，不会静默失败。
+- 更新地址固定为 `https://api.github.com/repos/sayaxia/ShieldDNS-for-Android/releases/latest`，资产从该 Release 的 apk / sha256 里取。
+
 ## 0.1.2（正式版，2026-11-11）
 
 本版整合了 0.1.2v1 / v2 / v3 三轮真机迭代的全部修复，下面按问题归类。
