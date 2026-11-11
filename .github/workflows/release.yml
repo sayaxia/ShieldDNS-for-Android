@@ -27,19 +27,20 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: 解析版本号
+      - name: 校验版本号
         id: ver
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME#v}"
           if [ -z "$TAG" ] || [ "$TAG" = "$GITHUB_REF_NAME" ]; then
-            TAG=$(grep -oP "appVersionName = .*?: '\K[^']+" build.gradle | head -1)
+            echo "::error::必须由 vX.Y.Z 的 tag 触发"; exit 1
           fi
-          MAJOR=${TAG%%.*}; REST=${TAG#*.}; MINOR=${REST%%.*}; PATCH=${REST#*.}
-          CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          FILE_VER=$(grep -oP "appVersionName = .*?: '\K[^']+" build.gradle | head -1)
+          if [ "$TAG" != "$FILE_VER" ]; then
+            echo "::error::tag 是 $TAG，但 build.gradle 里是 $FILE_VER，先同步再打 tag"; exit 1
+          fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "版本 $TAG / versionCode $CODE"
+          echo "版本 $TAG（versionCode 取 build.gradle 的 ext，不在这里改）"
 
       - name: 写入签名材料
         env:
