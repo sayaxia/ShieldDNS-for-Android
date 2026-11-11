@@ -77,7 +77,7 @@ jobs:
           (cd dist && sha256sum "ShieldDNS-Android-${VER}.apk" > "ShieldDNS-Android-${VER}.sha256")
           bash scripts/pack-source.sh "$VER" dist
           # 发布前拦住未签名包
-          apksigner verify "dist/ShieldDNS-Android-${VER}.apk"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify "dist/ShieldDNS-Android-${VER}.apk"
           ls -l dist
 
       - name: 创建 Release
