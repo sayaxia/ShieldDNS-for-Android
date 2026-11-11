@@ -14,7 +14,7 @@ class DnsPipeline(
     private val forward: (ByteArray, Boolean) -> ByteArray?,
     private val blockMode: () -> String,
     private val cacheEnabled: () -> Boolean,
-    private val onQuery: (String, Boolean) -> Unit,
+    private val onQuery: (String, Boolean, Boolean, Boolean) -> Unit,
     private val onCached: () -> Unit,
     private val onForwardFailed: () -> Unit,
     private val deliver: (ByteArray) -> Unit
@@ -70,7 +70,7 @@ class DnsPipeline(
         if (engine.isBlocked(q.name)) {
             val zero = blockMode() == "zero"
             respond(DnsPackets.buildResponse(query, 0, q.questionEnd, if (zero) 0 else 3, zero))
-            onQuery(q.name, true)
+            onQuery(q.name, true, viaTcp, false)
             return
         }
 
@@ -80,12 +80,12 @@ class DnsPipeline(
                 // 缓存里是某一次的应答，ID 必须换成这次的，否则客户端丢弃
                 respond(DnsPackets.adoptId(hit.payload, query, 0))
                 onCached()
-                onQuery(q.name, false)
+                onQuery(q.name, false, viaTcp, true)
                 return
             }
         }
 
-        onQuery(q.name, false)
+        onQuery(q.name, false, viaTcp, false)
         pool.execute {
             val resp = forward(query, viaTcp)
             if (resp == null) {

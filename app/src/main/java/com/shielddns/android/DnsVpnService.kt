@@ -135,7 +135,7 @@ class DnsVpnService : VpnService() {
             },
             blockMode = { Prefs.blockMode },
             cacheEnabled = { Prefs.cacheEnabled },
-            onQuery = { host, blocked -> Stats.onQuery(host, blocked) },
+            onQuery = { host, blocked, tcp, cached -> Stats.onQuery(host, blocked, tcp, cached) },
             onCached = { Stats.cached.incrementAndGet() },
             onForwardFailed = { Stats.failed.incrementAndGet() },
             deliver = { packet -> writeOut(packet) }

@@ -157,6 +157,13 @@ object Ui {
         box.addView(
             text(ctx, if (e.blocked) "已拦截" else "已放行", 12f, if (e.blocked) DANGER else ACCENT, true)
         )
+        val tags = buildList {
+            add(if (e.tcp) "TCP:53" else "UDP:53")
+            if (e.cached) add("缓存命中")
+        }
+        box.addView(text(ctx, tags.joinToString(" · "), 11.5f, MUTED).apply {
+            setPadding(0, dp(ctx, 6), 0, 0)
+        })
 
         android.app.AlertDialog.Builder(ctx, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("查询详情")

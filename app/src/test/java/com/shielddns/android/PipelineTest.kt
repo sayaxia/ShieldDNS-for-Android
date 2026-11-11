@@ -58,7 +58,7 @@ class PipelineTest {
             forward = { raw, _ -> upstream?.invoke(raw) },
             blockMode = { "nxdomain" },
             cacheEnabled = { true },
-            onQuery = { _, _ -> },
+            onQuery = { _, _, _, _ -> },
             onCached = cached,
             onForwardFailed = {},
             deliver = { pkt -> out.add(pkt) }
@@ -230,7 +230,7 @@ class PipelineTest {
             forward = { _, _ -> null },
             blockMode = { "nxdomain" },
             cacheEnabled = { true },
-            onQuery = { _, _ -> },
+            onQuery = { _, _, _, _ -> },
             onCached = {},
             onForwardFailed = {},
             deliver = { pkt -> out.add(pkt) }

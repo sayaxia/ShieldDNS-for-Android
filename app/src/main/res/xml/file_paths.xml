@@ -2,4 +2,6 @@
 <paths>
     <!-- 自升级下载的 APK 存放在 cacheDir/updates，只暴露这一个目录 -->
     <cache-path name="updates" path="updates/" />
+    <!-- 诊断导出的 CSV -->
+    <cache-path name="diagnostics" path="diagnostics/" />
 </paths>

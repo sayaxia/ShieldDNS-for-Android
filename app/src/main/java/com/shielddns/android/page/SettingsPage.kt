@@ -10,6 +10,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
 import com.shielddns.android.DnsVpnService
+import com.shielddns.android.Diagnostics
 import com.shielddns.android.MainActivity
 import com.shielddns.android.Page
 import com.shielddns.android.Prefs
@@ -103,6 +104,36 @@ class SettingsPage(private val a: MainActivity) : Page {
             Prefs.autoUpdate = it
         })
         column.addView(miscCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
+
+        // ---- 诊断导出 ----
+        column.addView(Ui.sectionTitle(a, "诊断导出"))
+        val diagCard = Ui.card(a).apply { setPadding(Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14)) }
+        diagCard.addView(Ui.text(
+            a,
+            "导出查询日志为 CSV（含版本、当前网络、上游、规则数与高频域名）。复现某个应用的广告后立刻导出，日志里就是它那段时间的 DNS 请求。",
+            11.5f, Ui.MUTED
+        ))
+        val diagRow = Ui.row(a)
+        val windows = ArrayList<Pair<String, Long?>>().apply {
+            add("最近 2 分钟" to 120_000L)
+            add("最近 10 分钟" to 600_000L)
+            add("全部" to null)
+        }
+        windows.forEachIndexed { idx, pair ->
+            val b = Ui.button(a, pair.first, primary = false)
+            b.setOnClickListener {
+                runCatching { Diagnostics.export(a, pair.second) }.onFailure {
+                    android.widget.Toast.makeText(
+                        a, "导出失败：${it.message}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            val lp = Ui.lpWeight(1f)
+            if (idx < windows.size - 1) lp.rightMargin = Ui.dp(a, 8)
+            diagRow.addView(b, lp)
+        }
+        diagCard.addView(diagRow, Ui.lpMatch().apply { topMargin = Ui.dp(a, 10) })
+        column.addView(diagCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
 
         // ---- 关于 ----
         column.addView(Ui.sectionTitle(a, "关于"))

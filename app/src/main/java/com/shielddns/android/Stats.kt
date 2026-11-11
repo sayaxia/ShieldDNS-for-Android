@@ -6,7 +6,13 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.atomic.AtomicLong
 
-data class LogEntry(val time: Long, val host: String, val blocked: Boolean)
+data class LogEntry(
+    val time: Long,
+    val host: String,
+    val blocked: Boolean,
+    val tcp: Boolean = false,
+    val cached: Boolean = false,
+)
 
 /** 运行期状态：进程内共享，UI 每秒拉一次即可。 */
 object Stats {
@@ -60,10 +66,10 @@ object Stats {
         lastError = ""
     }
 
-    fun onQuery(host: String, isBlocked: Boolean) {
+    fun onQuery(host: String, isBlocked: Boolean, tcp: Boolean = false, fromCache: Boolean = false) {
         total.incrementAndGet()
         if (isBlocked) blocked.incrementAndGet()
-        recent.addFirst(LogEntry(System.currentTimeMillis(), host, isBlocked))
+        recent.addFirst(LogEntry(System.currentTimeMillis(), host, isBlocked, tcp, fromCache))
         while (recent.size > MAX_LOG) recent.pollLast()
     }
 
