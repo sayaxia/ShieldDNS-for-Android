@@ -1,0 +1,87 @@
+name: Android Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: 解析版本号
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ -z "$TAG" ] || [ "$TAG" = "$GITHUB_REF_NAME" ]; then
+            TAG=$(grep -oP "appVersionName = .*?: '\K[^']+" build.gradle | head -1)
+          fi
+          MAJOR=${TAG%%.*}; REST=${TAG#*.}; MINOR=${REST%%.*}; PATCH=${REST#*.}
+          CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "版本 $TAG / versionCode $CODE"
+
+      - name: 写入签名材料
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SP: ${{ secrets.SHIELDDNS_STORE_PASS }}
+          KA: ${{ secrets.SHIELDDNS_KEY_ALIAS }}
+          KP: ${{ secrets.SHIELDDNS_KEY_PASS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KS" ]; then echo "::error::缺少 secret ANDROID_KEYSTORE_BASE64"; exit 1; fi
+          mkdir -p keystore
+          printf '%s' "$KS" | base64 -d > keystore/shielddns.jks
+          {
+            echo "storeFile=keystore/shielddns.jks"
+            echo "storePassword=$SP"
+            echo "keyAlias=$KA"
+            echo "keyPassword=$KP"
+          } > signing.properties
+          chmod 600 signing.properties
+
+      - name: 单测与构建
+        run: |
+          set -euo pipefail
+          gradle --no-daemon testDebugUnitTest assembleRelease \
+            -PversionName=${{ steps.ver.outputs.version }} \
+            -PversionCode=${{ steps.ver.outputs.code }}
+
+      - name: 生成发布资产
+        run: |
+          set -euo pipefail
+          VER=${{ steps.ver.outputs.version }}
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/ShieldDNS-Android-${VER}.apk"
+          (cd dist && sha256sum "ShieldDNS-Android-${VER}.apk" > "ShieldDNS-Android-${VER}.sha256")
+          bash scripts/pack-source.sh "$VER" dist
+          # 发布前拦住未签名包
+          apksigner verify "dist/ShieldDNS-Android-${VER}.apk"
+          ls -l dist
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

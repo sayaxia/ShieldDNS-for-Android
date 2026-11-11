@@ -2,6 +2,11 @@
 
 桌面版 [ShieldDNS](https://github.com/sayaxia/ShieldDNS) 的安卓版本：本地 DNS 过滤，不需要 root，不接管除 DNS 以外的任何流量。
 
+## 系统要求
+
+- Android 8.0（API 26）及以上
+- 安装包为 `arm64` / `x86_64` 通用，纯 Kotlin，无 native 库
+
 ## 它做什么
 
 安卓不允许普通应用监听 53 端口，所以这里用 `VpnService` 建一个**只有 DNS 走它**的本地 VPN：
@@ -31,8 +36,8 @@
 ||ads.example.com^        阻断该域名及所有子域
 @@||ok.example.com^       例外（优先于阻断）
 example.com               裸域名，同样覆盖子域
-0.0.0.0 tracker.example    hosts 写法
-127.0.0.1 beacon.example   hosts 写法
+0.0.0.0 tracker.example   hosts 写法
+127.0.0.1 beacon.example  hosts 写法
 ```
 
 `!` / `#` 开头的注释、`##` 外观规则、`$options`、正则、`*` 这类不支持的行会被跳过。
@@ -40,7 +45,7 @@ example.com               裸域名，同样覆盖子域
 
 ## 使用
 
-1. 安装 APK（`arm64` / `x86_64` 通用，纯 Kotlin，无 native 库）。
+1. 安装 APK。
 2. 打开应用 → 概览页打开开关 → 系统弹出 VPN 授权 → 允许。
 3. 到「过滤订阅」加一条规则源（例如 AdGuard DNS filter 的 `https://…/adguard.txt`），点更新。
 4. 想要开机后一直生效，可在系统设置里把 ShieldDNS 设为「始终开启的 VPN」。
@@ -52,23 +57,18 @@ example.com               裸域名，同样覆盖子域
 - 拦截靠伪造应答（NXDOMAIN 或 0.0.0.0），不修改系统 DNS 设置，卸载/关闭开关即刻恢复。
 - 上游默认跟随系统当前网络的 DNS（只取 IPv4），拿不到时回退 `223.5.5.5` / `8.8.8.8`。
 
-## 构建
+## 隐私
 
-```bash
-export JAVA_HOME=<jdk17>
-export ANDROID_HOME=<android sdk，需 platforms;android-34 与 build-tools;34.0.0>
-export GRADLE_USER_HOME=<gradle home>
-gradle assembleRelease        # 产物：app/build/outputs/apk/release/app-release.apk
-gradle testDebugUnitTest      # 13 条单测：规则引擎 / 报文构造 / 端到端管线 / 转发
-```
+- 查询日志只存在本机内存里，最多 300 条，关掉开关或退出应用就没了，不会上传。
+- 订阅规则、配置存在应用私有目录（SharedPreferences）。
+- VPN 只把 DNS 收进本地接口，其它流量不经过本应用，也不做任何转发记录。
 
-`gradle.properties` 里的 `javax.net.ssl.trustStore` 是给沙箱环境的 HTTPS 中间人所用，正常机器上删掉即可。
-
-release 用 `keystore/shielddns.jks` 自签（密码均为 `shielddns`，有效期 100 年）。
-**换了 keystore 就无法覆盖安装**，请留好这个文件。
-
-## 版本
+## 版本记录
 
 `0.1.1` — 修掉「未开启时概览页只剩开关」「关闭开关又自己弹回」「自动更新要等更新过一次才生效」三个问题；概览页不再显示上游 DNS。
 
 `0.1.0` — 首个可安装版本：VPN 形式的 DNS 过滤、订阅、自定义规则、日志、设置、缓存、通知栏常驻与「暂停防护」。
+
+## 构建与开发
+
+见 [docs/BUILD.md](docs/BUILD.md)。
