@@ -1,0 +1,11 @@
+# 代码归属：命中这些路径的 PR 会自动请求对应负责人 review
+#
+# rules/ 下是线上规则源，客户端拉取后直接决定拦截行为。
+# 改动会影响所有用户，必须由仓库所有者看过再合入：
+#   - 改完规则跑 bash scripts/sign-rules.sh 重新生成 .sig，正文与签名必须同步提交
+#   - 签名不过的规则客户端会拒收并回退随包副本
+/rules/ @sayaxia
+
+# 发布流程与构建脚本
+/.github/ @sayaxia
+/scripts/ @sayaxia
