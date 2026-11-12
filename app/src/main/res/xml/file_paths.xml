@@ -4,4 +4,6 @@
     <cache-path name="updates" path="updates/" />
     <!-- 诊断导出的 CSV -->
     <cache-path name="diagnostics" path="diagnostics/" />
+    <!-- 配置备份的 JSON -->
+    <cache-path name="backup" path="backup/" />
 </paths>

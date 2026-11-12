@@ -27,6 +27,6 @@ allprojects {
 
 // 版本号单一来源。改版本只改这里；CI 用 -PversionName / -PversionCode 按 tag 覆盖。
 ext {
-    appVersionCode = (project.findProperty('versionCode') ?: 35).toInteger()
-    appVersionName = (project.findProperty('versionName') ?: '0.3.0').toString()
+    appVersionCode = (project.findProperty('versionCode') ?: 36).toInteger()
+    appVersionName = (project.findProperty('versionName') ?: '0.3.1').toString()
 }

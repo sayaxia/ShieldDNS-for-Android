@@ -33,6 +33,10 @@ class RuleEngine {
     @Volatile
     private var layers: List<Layer> = emptyList()
 
+    /** [CriticalHosts] 解析出来的放行层，只解析一次。 */
+    @Volatile
+    private var criticalLayer: Layer? = null
+
     private val maxWild = 2000
 
     @Volatile
@@ -51,6 +55,10 @@ class RuleEngine {
      * @param sources 订阅层，顺序即优先级（第一个最高）
      * @param custom  自定义规则，优先级最高
      * @param fallback 兜底层（内置规则），优先级最低
+     *
+     * 层序：自定义 → 关键域名放行（见 [CriticalHosts]）→ 订阅 → 内置。
+     * 关键域名那层只有例外，作用是把订阅/内置的误伤挡下来；用户自定义仍能覆盖它。
+     * 它属于内置兜底、不是用户可管理的规则，所以不计入 [ruleCount]。
      */
     fun rebuild(
         sources: List<String>,
@@ -62,8 +70,20 @@ class RuleEngine {
         texts.addAll(sources)
         texts.addAll(fallback)
         val built = texts.filter { it.isNotBlank() }.map { parseLayer(it) }
+
+        val critical = criticalLayer ?: parseLayer(CriticalHosts.TEXT).also { criticalLayer = it }
+        val ordered = ArrayList<Layer>(built.size + 1)
+        if (custom.isNotBlank() && built.isNotEmpty()) {
+            ordered.add(built[0])
+            ordered.add(critical)
+            ordered.addAll(built.subList(1, built.size))
+        } else {
+            ordered.add(critical)
+            ordered.addAll(built)
+        }
+
         // 整体替换引用，读线程永远看到一份完整的规则表
-        layers = built
+        layers = ordered
         blockedCount = built.sumOf { it.blocked.size + it.wildBlocked.size }
         allowCount = built.sumOf { it.allowed.size + it.wildAllowed.size }
         ruleCount = blockedCount + allowCount

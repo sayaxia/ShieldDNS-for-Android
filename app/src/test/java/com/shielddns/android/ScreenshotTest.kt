@@ -28,7 +28,7 @@ class ScreenshotTest {
         sel.isAccessible = true
         val out = File(System.getProperty("screenshot.dir") ?: "/tmp/shielddns-ui").apply { mkdirs() }
         val decor = a.window.decorView
-        listOf("1-overview", "2-subs", "3-rules", "4-log", "5-settings").forEachIndexed { i, name ->
+        listOf("1-overview", "2-subs", "3-rules", "4-log", "5-settings", "6-settings-bottom").forEachIndexed { i, name ->
             if (i == 2) {
                 Prefs.customRules = "# 示例\n||*-reading-ad.qznovelvod.com^\n||ads*.zijieapi.com^\nexample.com\nexample.com##.banner\n/ads[0-9]/\nlocalhost"
             }
@@ -41,7 +41,8 @@ class ScreenshotTest {
                     )
                 )
             }
-            sel.invoke(a, i)
+            // 第 6 张仍是设置页（索引 4），只是滚到底
+            sel.invoke(a, if (i >= 4) 4 else i)
             if (i == 1) {
                 // 切到多选态，验证圆形勾选框
                 runCatching {
@@ -63,6 +64,20 @@ class ScreenshotTest {
                 View.MeasureSpec.makeMeasureSpec(2280, View.MeasureSpec.EXACTLY)
             )
             decor.layout(0, 0, 1080, 2280)
+            if (i == 5) {
+                // 设置页太长，再截一张滚到底的，看诊断导出与备份卡片的排布
+                runCatching {
+                    val pf = MainActivity::class.java.getDeclaredField("pages")
+                    pf.isAccessible = true
+                    val page = (pf.get(a) as List<*>)[4] as com.shielddns.android.Page
+                    (page.view as android.widget.ScrollView).scrollTo(0, 10000)
+                    decor.measure(
+                        View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(2280, View.MeasureSpec.EXACTLY)
+                    )
+                    decor.layout(0, 0, 1080, 2280)
+                }.onFailure { println("滚动设置页失败: $it") }
+            }
             val bmp = Bitmap.createBitmap(1080, 2280, Bitmap.Config.ARGB_8888)
             decor.draw(Canvas(bmp))
             if (i == 1) Prefs.saveSubs(emptyList())

@@ -9,6 +9,7 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
+import com.shielddns.android.Backup
 import com.shielddns.android.DnsVpnService
 import com.shielddns.android.Diagnostics
 import com.shielddns.android.MainActivity
@@ -189,6 +190,34 @@ class SettingsPage(private val a: MainActivity) : Page {
         }
         diagCard.addView(diagRow, Ui.lpMatch().apply { topMargin = Ui.dp(a, 10) })
         column.addView(diagCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
+
+        // ---- 备份与恢复 ----
+        column.addView(Ui.sectionTitle(a, "备份与恢复"))
+        val backupCard = Ui.card(a).apply { setPadding(Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14), Ui.dp(a, 14)) }
+        backupCard.addView(Ui.text(
+            a,
+            "备份包含订阅列表与顺序、自定义规则、内置策略开关和各项设置；不含查询日志与已下载的规则文件，恢复后会自动重新拉取。恢复会整体替换当前配置。",
+            11.5f, Ui.MUTED
+        ))
+        val backupRow = Ui.row(a)
+        val exportBtn = Ui.button(a, "导出备份", primary = false)
+        exportBtn.textSize = 12.5f
+        exportBtn.setOnClickListener {
+            runCatching { Backup.export(a) }.onFailure {
+                android.widget.Toast.makeText(
+                    a, "导出失败：${it.message}", android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        backupRow.addView(exportBtn, LinearLayout.LayoutParams(0, btnH, 1f).apply {
+            rightMargin = Ui.dp(a, 6)
+        })
+        val importBtn = Ui.button(a, "从文件恢复", primary = false)
+        importBtn.textSize = 12.5f
+        importBtn.setOnClickListener { a.pickBackup() }
+        backupRow.addView(importBtn, LinearLayout.LayoutParams(0, btnH, 1f))
+        backupCard.addView(backupRow, Ui.lpMatch().apply { topMargin = Ui.dp(a, 10) })
+        column.addView(backupCard, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 14) })
 
         // ---- 关于 ----
         column.addView(Ui.sectionTitle(a, "关于"))

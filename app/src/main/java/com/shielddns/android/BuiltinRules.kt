@@ -39,13 +39,14 @@ object BuiltinRules {
 
     fun cacheFile(ctx: Context): File = SubStore.fileFor(ctx, entry())
 
-    /** 优先读下载到本地的副本，没有再回退打包在 assets 里的同格式文件。 */
+    /**
+     * 优先读下载到本地的副本，没有再回退打包在 assets 里的同格式文件。
+     * 本地副本必须通过签名校验才用：没有签名文件、签名不符（比如旧版本留下的未签名缓存，
+     * 或被人改过盘上的文件）一律当作没有，直接回退 assets。
+     */
     fun raw(ctx: Context): String {
         cached?.let { return it }
-        val f = runCatching { cacheFile(ctx) }.getOrNull()
-        val disk = if (f != null && f.exists()) {
-            runCatching { f.readText() }.getOrDefault("")
-        } else ""
+        val disk = runCatching { SubStore.loadVerified(ctx, entry()) }.getOrNull().orEmpty()
         val text = if (disk.isBlank()) assets(ctx) else disk
         cached = text
         return text

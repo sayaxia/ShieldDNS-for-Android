@@ -60,6 +60,12 @@ class DnsVpnService : VpnService() {
         /** 服务与界面同进程，这个标志比查 VPN 传输类型更准（不会把别的 VPN 应用当成自己）。 */
         fun isRunning(): Boolean = alive
 
+        /** 配置被外部改过（导入备份、恢复默认）时，让运行中的服务立刻重建规则表。 */
+        fun reloadIfRunning(ctx: Context) {
+            val inst = instance ?: return
+            inst.main.post { inst.reloadRules() }
+        }
+
         fun startIntent(ctx: Context): Intent = Intent(ctx, DnsVpnService::class.java)
 
         fun stop(ctx: Context) {

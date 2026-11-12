@@ -107,8 +107,43 @@ class Resolver(
 /** 订阅：下载、落盘、统计条数。文件放在 filesDir/filters/<id>.txt。 */
 object SubStore {
 
+    /** 签名文件与规则文件同目录、同名加后缀。 */
+    const val SIG_SUFFIX = ".sig"
+
     fun fileFor(ctx: Context, sub: SubEntry): File =
         File(File(ctx.filesDir, "filters"), "${sub.id}.txt")
+
+    fun sigFileFor(ruleFile: File): File = File(ruleFile.parentFile, ruleFile.name + SIG_SUFFIX)
+
+    /** 读某个 URL 的原始字节（签名文件是二进制，不能按文本读）。 */
+    fun fetchBytes(url: String): ByteArray {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15000
+            readTimeout = 20000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "ShieldDNS-Android/" + BuildConfig.VERSION_NAME)
+        }
+        try {
+            val code = conn.responseCode
+            if (code !in 200..299) error("HTTP $code")
+            return conn.inputStream.use { it.readBytes() }
+        } finally {
+            runCatching { conn.disconnect() }
+        }
+    }
+
+    /**
+     * 读本地缓存并验签。文件缺失、没有签名、签名对不上都返回 null，
+     * 调用方应退回随包副本，绝不用未经校验的内容。
+     */
+    fun loadVerified(ctx: Context, sub: SubEntry): String? {
+        val f = runCatching { fileFor(ctx, sub) }.getOrNull() ?: return null
+        if (!f.exists()) return null
+        val raw = runCatching { f.readBytes() }.getOrNull() ?: return null
+        val sig = runCatching { sigFileFor(f).readBytes() }.getOrNull() ?: return null
+        if (!RuleVerify.verify(raw, sig)) return null
+        return raw.toString(Charsets.UTF_8)
+    }
 
     fun loadAll(ctx: Context, subs: List<SubEntry>): List<String> {
         val out = mutableListOf<String>()
@@ -131,15 +166,30 @@ object SubStore {
             val code = conn.responseCode
             if (code !in 200..299) error("HTTP $code")
             val text = conn.inputStream.bufferedReader().use { it.readText() }
+
+            // 内置策略是全网共享的一条规则源，只接受发布者私钥签过的正文。
+            // 验不过直接失败，正文不进缓存，旧副本继续用。用户自建订阅不做强制验签。
+            val signed = sub.id == BuiltinRules.ID
+            var sigBytes: ByteArray? = null
+            if (signed) {
+                val got = runCatching { fetchBytes(sub.url + SIG_SUFFIX) }.getOrNull()
+                if (got == null || !RuleVerify.verify(text.toByteArray(), got)) {
+                    error("签名校验失败，未采用这次下载")
+                }
+                sigBytes = got
+            }
+
             val f = fileFor(ctx, sub)
             val old = if (f.exists()) runCatching { f.readText() }.getOrDefault("") else ""
             val before = if (old.isEmpty()) 0 else countRules(old)
             val newCount = countRules(text)
             // 内容是否要落盘：看规则条目指纹（注释、空行、顺序差异不算）
             val contentChanged = ruleSignature(old) != ruleSignature(text)
-            if (contentChanged) {
+            val needSig = signed && !sigFileFor(f).exists()
+            if (contentChanged || needSig) {
                 f.parentFile?.mkdirs()
                 f.writeText(text)
+                if (sigBytes != null) sigFileFor(f).writeBytes(sigBytes)
             }
             // 给用户看的「有没有变化」：只看规则条数增减。
             // 云盘/CDN 直链每次返回的字节可能带随机 token，按字节判会次次误报。

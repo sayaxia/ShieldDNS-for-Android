@@ -49,6 +49,29 @@ class MainActivity : AppCompatActivity() {
 
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /** 备份恢复：让用户用系统文件选择器挑一个 .json，读入后整体替换配置。 */
+    private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val t = Thread {
+            val res = runCatching { Backup.restore(this, uri) }
+                .getOrElse { Backup.RestoreResult(false, 0, it.message ?: "导入失败") }
+            runOnUiThread {
+                android.widget.Toast.makeText(this, res.message, android.widget.Toast.LENGTH_LONG).show()
+                pages.getOrNull(index)?.refresh()
+            }
+        }
+        t.isDaemon = true
+        t.start()
+    }
+
+    fun pickBackup() {
+        runCatching { openBackup.launch(arrayOf("*/*")) }.onFailure {
+            android.widget.Toast.makeText(
+                this, "打不开文件选择器：${it.message}", android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
