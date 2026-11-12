@@ -15,9 +15,11 @@ import org.json.JSONObject
 /**
  * 配置备份与恢复：把"用户亲手配出来的东西"打包成一个 JSON，换机、重装、出问题时能还原。
  *
- * 包含：订阅列表（名称/地址/开关/顺序）、自定义规则、内置策略的显示名与开关、
+ * 包含：订阅列表（名称/地址/开关/顺序）、自定义规则、内置策略的开关、
  *       以及上游 DNS、拦截响应、增强模式等设置项。
- * 不包含：查询日志（只在内存里）、已下载的规则文件（恢复后会自动重新拉一次）。
+ * 不包含：查询日志（只在内存里）、已下载的规则文件（恢复后会自动重新拉一次）、
+ *         内置策略的显示名与规则正文（显示名是本机偏好，正文由当前版本与签名决定，
+ *         这样旧备份永远不可能把新版本的规则带回旧内容）。
  */
 object Backup {
 
@@ -33,7 +35,7 @@ object Backup {
         root.put("exportedAt", System.currentTimeMillis())
 
         root.put("builtin", JSONObject().apply {
-            put("name", Prefs.builtinName)
+            // 只带开关。显示名是本机偏好，规则正文由当前版本与签名决定，都不进备份
             put("enabled", Prefs.builtinEnabled)
         })
 
@@ -137,11 +139,10 @@ object Backup {
             return RestoreResult(false, 0, "备份里有重复的订阅 id，未应用")
         }
 
+        // 内置策略只恢复开关：名字是本机偏好（旧备份里即便带了 name 也忽略），规则正文不归备份管
         val builtin = root.optJSONObject("builtin")
-        if (builtin != null) {
-            builtin.optString("name").takeIf { it.isNotBlank() }?.let { Prefs.builtinName = it }
-            Prefs.builtinEnabled = builtin.optBoolean("enabled", true)
-        }
+        val builtinOn = builtin?.optBoolean("enabled", Prefs.builtinEnabled) ?: Prefs.builtinEnabled
+        if (builtin != null) Prefs.builtinEnabled = builtinOn
         Prefs.saveSubs(subs)
         Prefs.customRules = root.optString("customRules", "")
 
@@ -163,13 +164,19 @@ object Backup {
         BuiltinRules.resetCache()
         DnsVpnService.reloadIfRunning(ctx)
 
-        // 规则文件没在备份里，后台补拉一次，避免恢复后名字回来了但规则是空的
-        if (resync && subs.isNotEmpty()) {
+        // 规则文件没在备份里，后台补拉一次，避免恢复后名字回来了但规则是空的。
+        // 内置策略也要补一次：正文不随备份走，别让它停在旧缓存上。
+        if (resync) {
             thread(name = "restore-resync") {
-                SubStore.refreshAll(ctx, subs, { _ -> }, { _, _, _ ->
-                    Prefs.saveSubs(subs)
+                if (subs.isNotEmpty()) {
+                    SubStore.refreshAll(ctx, subs, { _ -> }, { _, _, _ ->
+                        Prefs.saveSubs(subs)
+                        DnsVpnService.reloadIfRunning(ctx)
+                    })
+                }
+                BuiltinRules.update(ctx) { _, _, _, _ ->
                     DnsVpnService.reloadIfRunning(ctx)
-                })
+                }
             }
         }
 
@@ -177,6 +184,9 @@ object Backup {
             append("已恢复：${subs.size} 条订阅")
             append("、${Prefs.customRules.lineSequence().count { it.isNotBlank() }} 行自定义规则")
             if (skipped > 0) append("（跳过 $skipped 条无效订阅）")
+            if (builtin != null) {
+                append("。内置策略").append(if (builtinOn) "已开启" else "已关闭").append("（来自备份）")
+            }
             append("。规则正在后台重新下载。")
         }
         return RestoreResult(true, subs.size, msg)

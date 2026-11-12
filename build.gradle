@@ -25,8 +25,25 @@ allprojects {
     }
 }
 
-// 版本号单一来源。改版本只改这里；CI 用 -PversionName / -PversionCode 按 tag 覆盖。
+// 版本号单一来源。改版本只改这里；CI 用 -PversionName 按 tag 覆盖。
+//
+// versionCode 不再手工维护，由 versionName 推导，规则：
+//   0.3.1  -> 3100        0.3.1v1 -> 3101        0.3.2 -> 3200
+//   major*10000 + minor*1000 + patch*100 + vN（每段最大 99）
+// 这样 versionCode 永远单调递增，从测试包（带 vN）升级到正式版（不带 vN）只是 +1 位，
+// Android 只认 versionCode，所以装过 0.3.2v2 的机器能直接覆盖升级到 0.3.3。
 ext {
-    appVersionCode = (project.findProperty('versionCode') ?: 36).toInteger()
-    appVersionName = (project.findProperty('versionName') ?: '0.3.1').toString()
+    versionCodeOf = { String name ->
+        def m = (name =~ /^(\d+)\.(\d+)\.(\d+)(?:v(\d+))?$/)
+        if (!m.matches()) {
+            throw new GradleException("版本号格式不对：${name}，应为 X.Y.Z 或 X.Y.ZvN")
+        }
+        def parts = [m.group(1), m.group(2), m.group(3), m.group(4) ?: '0'].collect { it.toInteger() }
+        if (parts.any { it > 99 }) {
+            throw new GradleException("版本号每段不能超过 99：${name}")
+        }
+        parts[0] * 10000 + parts[1] * 1000 + parts[2] * 100 + parts[3]
+    }
+    appVersionName = (project.findProperty('versionName') ?: '0.3.3').toString()
+    appVersionCode = ext.versionCodeOf(appVersionName)
 }

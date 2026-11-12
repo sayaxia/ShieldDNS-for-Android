@@ -73,6 +73,27 @@ class BackupTest {
     }
 
     @Test
+    fun 恢复只带回内置开关不动显示名() {
+        Prefs.builtinName = "内置策略"
+        Prefs.builtinEnabled = true
+        // 旧备份里带 name 也忽略：名字是本机偏好，不进备份
+        val json = """{"schema":1,"builtin":{"name":"旧名字","enabled":false},"subs":[]}"""
+        val r = Backup.applyJson(ctx, json, resync = false)
+        assertTrue(r.message, r.ok)
+        assertEquals("内置策略", Prefs.builtinName)
+        assertFalse(Prefs.builtinEnabled)
+        assertTrue(r.message.contains("已关闭"))
+    }
+
+    @Test
+    fun 导出的备份不再携带内置显示名() {
+        Prefs.builtinName = "我的官方规则"
+        val json = Backup.buildJson()
+        assertFalse(json.contains("我的官方规则"))
+        assertTrue(json.contains("\"enabled\""))
+    }
+
+    @Test
     fun 跳过内置id与非法地址() {
         Prefs.saveSubs(emptyList())
         val json = """

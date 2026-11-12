@@ -40,7 +40,7 @@ jobs:
             echo "::error::tag 是 $TAG，但 build.gradle 里是 $FILE_VER，先同步再打 tag"; exit 1
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
-          echo "版本 $TAG（versionCode 取 build.gradle 的 ext，不在这里改）"
+          echo "版本 $TAG（versionCode 由 versionName 推导，见根 build.gradle）"
 
       - name: 写入签名材料
         env:

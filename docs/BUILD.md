@@ -49,13 +49,30 @@ keyPassword=<keypass>
 
 ## 版本号
 
-单一来源：根 `build.gradle` 的 `ext.appVersionCode / ext.appVersionName`，`app/build.gradle` 只引用。CI 用 `-PversionName` / `-PversionCode` 按 tag 覆盖。
+单一来源：根 `build.gradle` 的 `ext.appVersionName`。`versionCode` 由它推导，不再手工维护；CI 用 `-PversionName=<tag 去掉 v>` 覆盖，其余场景只传 `versionName` 就够。
 
-规则：
+推导规则：
 
-- 发布版 `x.y.z`（versionCode 单调递增）；
-- 测试版 `x.y.(z+1)v1`，同一轮多次启动递增 `vN`，发布时去掉 `vN` 后缀；
-- `README.md` 只写最终用户说明；测试迭代与开发说明写在本文件。
+```
+versionCode = major*10000 + minor*1000 + patch*100 + vN    （每段最大 99）
+```
+
+| versionName | versionCode | 用途 |
+| --- | --- | --- |
+| `0.3.1` | 3100 | 正式版 |
+| `0.3.1v1` | 3101 | 同一版本的第 1 个测试包 |
+| `0.3.2` | 3200 | 下一个正式版 |
+| `0.3.2v3` | 3203 | 第 3 个测试包 |
+
+迭代与发布：
+
+- 本机迭代只递增 `vN`，基号不动（`0.3.2v2` → `0.3.2v3`）；
+- 发布时基号升一级、去掉 `vN`（`0.3.2` → `0.3.3`），tag 与 `versionName` 必须一致（CI 会校验）；
+- 发布后的下一轮测试包，从刚发布的正式号起算（`0.3.3v1`）；
+- 正式包 versionCode 必大于同基号测试包（`3300` > `3299`），所以装过测试包的机器能直接覆盖升级为正式版；
+- 格式不合法或某一段超过 99 时构建直接失败，不会产出错号包。
+
+`README.md` 只写最终用户说明；测试迭代与开发说明写在本文件。
 
 ## 复现验收
 

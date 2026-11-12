@@ -78,6 +78,14 @@ android {
     }
 }
 
+// 随包副本 `assets/default-rules.txt` 永远跟 `rules/default-rules.txt` 一致：
+// 规则只维护仓库里那一份，构建时自动同步，避免改了规则却忘了更新 assets（客户端离线时读的就是它）。
+def syncDefaultRules = tasks.register('syncDefaultRules', Copy) {
+    from rootProject.file('rules/default-rules.txt')
+    into layout.projectDirectory.dir('src/main/assets')
+}
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn(syncDefaultRules) }
+
 dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'

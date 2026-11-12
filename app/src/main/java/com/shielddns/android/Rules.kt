@@ -15,8 +15,9 @@ package com.shielddns.android
  *
  * 分层：规则按来源分成若干层，从高优先级到低优先级判定。
  * 同一层内例外永远先于拦截；层与层之间，高优先级层先给结论 ——
- * 也就是「自定义规则 > 订阅（列表越靠上越高）> 内置规则」。
- * 这样订阅的拖动排序才是真的优先级，而不是摆设。
+ * 也就是「自定义规则 > 关键域名放行 > 内置策略 > 订阅（列表越靠上越高）」。
+ * 内置策略在「过滤订阅」页是置顶且不可拖动的，所以它在引擎里也真的排在订阅之前，
+ * 任何订阅都压不过它；订阅之间仍然按拖动顺序决定优先级。
  *
  * 匹配方式：把 QNAME 按标签逐级截断去查 HashSet，一次查询最多几次哈希，十万级规则也很轻。
  */
@@ -54,10 +55,10 @@ class RuleEngine {
     /**
      * @param sources 订阅层，顺序即优先级（第一个最高）
      * @param custom  自定义规则，优先级最高
-     * @param fallback 兜底层（内置规则），优先级最低
+     * @param fallback 内置策略，页面上置顶且不可拖动，因此引擎里排在所有订阅之前
      *
-     * 层序：自定义 → 关键域名放行（见 [CriticalHosts]）→ 订阅 → 内置。
-     * 关键域名那层只有例外，作用是把订阅/内置的误伤挡下来；用户自定义仍能覆盖它。
+     * 层序：自定义 → 关键域名放行（见 [CriticalHosts]）→ 内置 → 订阅。
+     * 关键域名那层只有例外，作用是把所有来源的误伤挡下来；用户自定义仍能覆盖它。
      * 它属于内置兜底、不是用户可管理的规则，所以不计入 [ruleCount]。
      */
     fun rebuild(
@@ -67,8 +68,8 @@ class RuleEngine {
     ) {
         val texts = ArrayList<String>(sources.size + fallback.size + 1)
         if (custom.isNotBlank()) texts.add(custom)
-        texts.addAll(sources)
         texts.addAll(fallback)
+        texts.addAll(sources)
         val built = texts.filter { it.isNotBlank() }.map { parseLayer(it) }
 
         val critical = criticalLayer ?: parseLayer(CriticalHosts.TEXT).also { criticalLayer = it }
