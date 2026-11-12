@@ -16,14 +16,17 @@
 ||pgdt.gtimg.cn^
 # 巨量引擎（广告主投放后台与素材）
 ||oceanengine.com^
-# 例外：正片、正片 CDN、书封图片优先放行。判定顺序在代码里，例外永远先于拦截
-@@||*reading-video*^
-@@||*videocdn*^
-@@||*reading.fqnovelstatic*^
-@@||*reading.fqnovelpic*^
-@@||*misc-hl.fqnovel.com^
-@@||*applog-hl.fqnovel.com^
-@@||*novel.byteimg.com^
+# 例外已注释：内置策略现在排在最前（优先级高于所有订阅），
+# 这些 @@ 原本是为了防订阅误伤写的，现在改由各来源自行判定 ——
+# 埋点/日志（misc-hl、applog-hl）照旧被外部订阅拦掉，正片靠不命中拦截规则自然放行。
+# 需要恢复某一条时，去掉行首的 # 即可。
+# @@||*reading-video*^
+# @@||*videocdn*^
+# @@||*reading.fqnovelstatic*^
+# @@||*reading.fqnovelpic*^
+# @@||*misc-hl.fqnovel.com^
+# @@||*applog-hl.fqnovel.com^
+# @@||*novel.byteimg.com^
 
 # == [sni] ==
 # 以下域名整域专属某家广告 SDK，只对白名单应用生效，不波及其它 App
