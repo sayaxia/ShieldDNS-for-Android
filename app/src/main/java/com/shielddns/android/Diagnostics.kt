@@ -49,6 +49,7 @@ object Diagnostics {
         sb.append("# upstream=").append(Stats.upstreamText).append('\n')
         sb.append("# listen=").append(Stats.listenText).append('\n')
         sb.append("# rules=").append(Stats.rules).append('\n')
+        sb.append("# sni_rules=").append(Stats.sniRules).append('\n')
         sb.append("# enhance=").append(enhanceText).append('\n')
         sb.append("# tcp: ok=").append(Stats.tcpOk.get())
             .append(" fail=").append(Stats.tcpFail.get())

@@ -29,7 +29,35 @@ class ScreenshotTest {
         val out = File(System.getProperty("screenshot.dir") ?: "/tmp/shielddns-ui").apply { mkdirs() }
         val decor = a.window.decorView
         listOf("1-overview", "2-subs", "3-rules", "4-log", "5-settings").forEachIndexed { i, name ->
+            if (i == 2) {
+                Prefs.customRules = "# 示例\n||*-reading-ad.qznovelvod.com^\n||ads*.zijieapi.com^\nexample.com\nexample.com##.banner\n/ads[0-9]/\nlocalhost"
+            }
+            if (i == 1) {
+                // 注入两条示例订阅，验证「手柄 + 开关 + 更新」的行布局
+                Prefs.saveSubs(
+                    listOf(
+                        SubEntry("a1", "红果专杀", "https://cdn.jsdelivr.net/gh/sayaxia/ShieldDNS-for-Android@main/rules/hongguo-adblock.txt", 15, System.currentTimeMillis(), true),
+                        SubEntry("b2", "AdGuard 基础", "https://filters.adtidy.org/android/filters/2_optimized.txt", 1234, 0L, false)
+                    )
+                )
+            }
             sel.invoke(a, i)
+            if (i == 1) {
+                // 切到多选态，验证圆形勾选框
+                runCatching {
+                    val pf = MainActivity::class.java.getDeclaredField("pages")
+                    pf.isAccessible = true
+                    val page = (pf.get(a) as List<*>)[1] as com.shielddns.android.page.SubsPage
+                    val m = com.shielddns.android.page.SubsPage::class.java
+                        .getDeclaredMethod("setSelectMode", Boolean::class.javaPrimitiveType)
+                    m.isAccessible = true
+                    m.invoke(page, true)
+                    val m2 = com.shielddns.android.page.SubsPage::class.java
+                        .getDeclaredMethod("toggleSelectAll")
+                    m2.isAccessible = true
+                    m2.invoke(page)
+                }.onFailure { println("多选态反射失败: $it") }
+            }
             decor.measure(
                 View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(2280, View.MeasureSpec.EXACTLY)
@@ -37,6 +65,8 @@ class ScreenshotTest {
             decor.layout(0, 0, 1080, 2280)
             val bmp = Bitmap.createBitmap(1080, 2280, Bitmap.Config.ARGB_8888)
             decor.draw(Canvas(bmp))
+            if (i == 1) Prefs.saveSubs(emptyList())
+            if (i == 2) Prefs.customRules = ""
             FileOutputStream(File(out, "$name.png")).use {
                 bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
             }

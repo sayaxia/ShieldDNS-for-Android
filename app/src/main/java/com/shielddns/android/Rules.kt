@@ -5,7 +5,7 @@ package com.shielddns.android
  *
  * 支持：
  *   ||example.com^        域名及所有子域拦截
- *   @@||good.example.com^ 例外（放行），优先于拦截
+ *   @@||good.example.com^ 例外（放行）
  *   example.com           裸域名
  *   0.0.0.0 example.com   hosts 格式
  *   |http://a.com/b|      前后锚定（取其中的域名部分）
@@ -13,22 +13,25 @@ package com.shielddns.android
  *   含 * 的规则编译成正则匹配，与上面按标签截断的 HashSet 匹配并存。
  * 忽略：注释（! 和 #）、## 外观规则、$options、正则、其它修饰符。
  *
+ * 分层：规则按来源分成若干层，从高优先级到低优先级判定。
+ * 同一层内例外永远先于拦截；层与层之间，高优先级层先给结论 ——
+ * 也就是「自定义规则 > 订阅（列表越靠上越高）> 内置规则」。
+ * 这样订阅的拖动排序才是真的优先级，而不是摆设。
+ *
  * 匹配方式：把 QNAME 按标签逐级截断去查 HashSet，一次查询最多几次哈希，十万级规则也很轻。
  */
 class RuleEngine {
 
-    @Volatile
-    private var blocked: Set<String> = emptySet()
+    private class Layer(
+        val blocked: Set<String>,
+        val allowed: Set<String>,
+        val wildBlocked: List<Regex>,
+        val wildAllowed: List<Regex>
+    )
 
+    /** 从高优先级到低优先级排列。 */
     @Volatile
-    private var allowed: Set<String> = emptySet()
-
-    /** 含 * 的规则，编译成正则在精确匹配未命中时兜底。 */
-    @Volatile
-    private var wildBlocked: List<Regex> = emptyList()
-
-    @Volatile
-    private var wildAllowed: List<Regex> = emptyList()
+    private var layers: List<Layer> = emptyList()
 
     private val maxWild = 2000
 
@@ -44,34 +47,48 @@ class RuleEngine {
     var allowCount: Int = 0
         private set
 
-    fun rebuild(sources: List<String>, custom: String) {
-        val bl = HashSet<String>(1 shl 17)
-        val al = HashSet<String>(1 shl 15)
-        val wb = ArrayList<Regex>()
-        val wa = ArrayList<Regex>()
-        sources.forEach { parseInto(it, bl, al, wb, wa) }
-        parseInto(custom, bl, al, wb, wa)
+    /**
+     * @param sources 订阅层，顺序即优先级（第一个最高）
+     * @param custom  自定义规则，优先级最高
+     * @param fallback 兜底层（内置规则），优先级最低
+     */
+    fun rebuild(
+        sources: List<String>,
+        custom: String = "",
+        fallback: List<String> = emptyList()
+    ) {
+        val texts = ArrayList<String>(sources.size + fallback.size + 1)
+        if (custom.isNotBlank()) texts.add(custom)
+        texts.addAll(sources)
+        texts.addAll(fallback)
+        val built = texts.filter { it.isNotBlank() }.map { parseLayer(it) }
         // 整体替换引用，读线程永远看到一份完整的规则表
-        blocked = bl
-        allowed = al
-        wildBlocked = wb.toList()
-        wildAllowed = wa.toList()
-        blockedCount = bl.size + wb.size
-        allowCount = al.size + wa.size
+        layers = built
+        blockedCount = built.sumOf { it.blocked.size + it.wildBlocked.size }
+        allowCount = built.sumOf { it.allowed.size + it.wildAllowed.size }
         ruleCount = blockedCount + allowCount
     }
 
     fun isBlocked(host: String): Boolean {
         if (host.isEmpty()) return false
-        val allow = allowed
-        val block = blocked
-        val wAllow = wildAllowed
-        val wBlock = wildBlocked
-        if (allow.isEmpty() && block.isEmpty() && wAllow.isEmpty() && wBlock.isEmpty()) return false
-        if (matchSuffix(allow, host)) return false
-        if (wAllow.isNotEmpty() && wAllow.any { it.matches(host) }) return false
-        if (matchSuffix(block, host)) return true
-        return wBlock.isNotEmpty() && wBlock.any { it.matches(host) }
+        val ls = layers
+        if (ls.isEmpty()) return false
+        for (l in ls) {
+            if (l.allowed.isNotEmpty() && matchSuffix(l.allowed, host)) return false
+            if (l.wildAllowed.isNotEmpty() && l.wildAllowed.any { it.matches(host) }) return false
+            if (l.blocked.isNotEmpty() && matchSuffix(l.blocked, host)) return true
+            if (l.wildBlocked.isNotEmpty() && l.wildBlocked.any { it.matches(host) }) return true
+        }
+        return false
+    }
+
+    private fun parseLayer(text: String): Layer {
+        val bl = HashSet<String>()
+        val al = HashSet<String>()
+        val wb = ArrayList<Regex>()
+        val wa = ArrayList<Regex>()
+        parseInto(text, bl, al, wb, wa)
+        return Layer(bl, al, wb, wa)
     }
 
     private fun matchSuffix(set: Set<String>, host: String): Boolean {
@@ -174,7 +191,6 @@ class RuleEngine {
             }
         }
         if (dots == 0) return false
-        // 去掉协议/路径尾巴
         return true
     }
 }

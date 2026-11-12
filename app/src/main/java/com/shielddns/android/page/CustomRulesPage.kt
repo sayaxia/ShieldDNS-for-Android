@@ -1,7 +1,9 @@
 package com.shielddns.android.page
 
 import android.graphics.Typeface
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -10,6 +12,7 @@ import android.widget.TextView
 import com.shielddns.android.MainActivity
 import com.shielddns.android.Page
 import com.shielddns.android.Prefs
+import com.shielddns.android.RuleLint
 import com.shielddns.android.Ui
 
 /** 自定义规则：AdGuard / hosts 语法，保存后立刻重建规则引擎。 */
@@ -17,7 +20,11 @@ class CustomRulesPage(private val a: MainActivity) : Page {
 
     override val view: View
     private val editor: EditText
-    private val hintText: TextView
+    private lateinit var hintText: TextView
+    /** 有未保存的编辑：非程序调用产生的文本变化 */
+    private var dirty = false
+    /** setText 由代码触发时置位，避免把程序写入当成用户编辑 */
+    private var programmatic = false
 
     init {
         val scroll = ScrollView(a)
@@ -55,24 +62,51 @@ class CustomRulesPage(private val a: MainActivity) : Page {
             val p = Ui.dp(a, 10)
             setPadding(p, p, p, p)
         }
+        // 打字过程中不打断：只提示「编辑中」，等收键盘（失焦）或点保存才真正体检
+        editor.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a2: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (programmatic) return
+                dirty = true
+                if (editor.hasFocus()) {
+                    hintText.text = "编辑中 · 收键盘后自动检查语法"
+                    hintText.setTextColor(Ui.MUTED)
+                }
+            }
+        })
+        editor.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) updateHint()
+        }
         card.addView(editor)
         column.addView(card, Ui.lpMatch().apply { bottomMargin = Ui.dp(a, 12) })
 
         val actions = Ui.row(a)
         val save = Ui.button(a, "保存并应用")
         save.setOnClickListener {
-            Prefs.customRules = editor.text.toString()
+            val text = editor.text.toString()
+            Prefs.customRules = text
             a.reloadService()
+            val r = RuleLint.check(text)
+            if (r.fatalCount > 0) {
+                android.widget.Toast.makeText(
+                    a, "已保存，其中 ${r.fatalCount} 行不会生效", android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
             save.text = "已保存"
             save.postDelayed({ save.text = "保存并应用" }, 1500)
-            updateHint()
+            dirty = false
+            updateHint(force = true)
         }
         val clear = Ui.button(a, "清空", primary = false)
         clear.setOnClickListener {
+            programmatic = true
             editor.setText("")
+            programmatic = false
+            dirty = false
             Prefs.customRules = ""
             a.reloadService()
-            updateHint()
+            updateHint(force = true)
         }
         actions.addView(save)
         actions.addView(View(a), android.widget.LinearLayout.LayoutParams(Ui.dp(a, 10), 1))
@@ -116,10 +150,47 @@ class CustomRulesPage(private val a: MainActivity) : Page {
             .show()
     }
 
-    private fun updateHint() {
-        val lines = Prefs.customRules.lineSequence().count { it.isNotBlank() }
-        hintText.text = if (lines == 0) "当前没有自定义规则。" else "当前 $lines 行非空规则，已生效。"
+    private fun updateHint(force: Boolean = false) {
+        if (!force && editor.hasFocus()) {
+            hintText.text = "编辑中 · 收键盘后自动检查语法"
+            hintText.setTextColor(Ui.MUTED)
+            return
+        }
+        val r = RuleLint.check(editor.text.toString())
+        if (r.valid == 0 && r.issues.isEmpty()) {
+            hintText.text = "当前没有自定义规则。"
+            hintText.setTextColor(Ui.MUTED)
+            return
+        }
+        val sb = StringBuilder("共 ${r.valid} 行有效")
+        if (r.ignored > 0) sb.append(" · 忽略 ${r.ignored} 行注释")
+        if (r.issues.isNotEmpty()) sb.append(" · ${r.issues.size} 行有问题")
+        val fatal = r.issues.filter { it.fatal }
+        if (fatal.isNotEmpty()) {
+            fatal.take(3).forEach {
+                sb.append("\n第 ${it.line} 行「${it.source.take(26)}」：${it.reason}")
+            }
+            if (fatal.size > 3) sb.append("\n…另有 ${fatal.size - 3} 行同样不会生效")
+        }
+        val warn = r.issues.filter { !it.fatal }
+        if (warn.isNotEmpty()) {
+            sb.append("\n第 ${warn.first().line} 行：${warn.first().reason}")
+            if (warn.size > 1) sb.append("（另有 ${warn.size - 1} 行同类）")
+        }
+        hintText.text = sb.toString()
+        hintText.setTextColor(if (fatal.isNotEmpty()) 0xFFE9A15C.toInt() else Ui.MUTED)
     }
 
-    override fun refresh() {}
+    override fun refresh() {
+        // 正在编辑时绝不回写：refresh 是周期性的，覆盖一次就等于把用户的输入撤销掉
+        if (editor.hasFocus()) return
+        val saved = Prefs.customRules
+        if (dirty || editor.text.toString() != saved) {
+            programmatic = true
+            editor.setText(saved)
+            programmatic = false
+            dirty = false
+        }
+        updateHint(force = true)
+    }
 }

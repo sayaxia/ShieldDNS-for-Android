@@ -104,7 +104,11 @@ class DnsVpnService : VpnService() {
         }
     }
 
+    /** DNS 层规则：内置 dns 段 + 订阅 + 自定义 */
     private val engine = RuleEngine()
+
+    /** SNI 层规则：内置 dns 段 + 内置 sni 段 + 订阅 + 自定义 */
+    private val sniEngine = RuleEngine()
     private lateinit var pipeline: DnsPipeline
     private lateinit var resolver: Resolver
     private lateinit var tcpProxy: TcpDnsProxy
@@ -145,10 +149,7 @@ class DnsVpnService : VpnService() {
             onCached = { Stats.cached.incrementAndGet() },
             onForwardFailed = { Stats.failed.incrementAndGet() },
             deliver = { packet -> writeOut(packet) },
-            sniBlocks = { host ->
-                enhanceActive && Prefs.sniBlockEnabled &&
-                    SniRules.shouldBlock(host, Prefs.blockLiveCdn)
-            }
+            sniBlocks = { host -> enhanceActive && shouldBlockSni(host) }
         )
         tcpProxy.onMessage = { msg, respond -> pipeline.onDnsMessage(msg, true, respond) }
         relay = TcpRelay(
@@ -158,9 +159,7 @@ class DnsVpnService : VpnService() {
         relay.onSni = { host, ech -> Stats.onSni(host, ech) }
         relay.onConnect = { ok -> Stats.onTcpConnect(ok) }
         relay.onRelayError = { target, reason -> Stats.onRelayError(target, reason) }
-        relay.blockPolicy = { host ->
-            Prefs.sniBlockEnabled && SniRules.shouldBlock(host, Prefs.blockLiveCdn)
-        }
+        relay.blockPolicy = { host -> shouldBlockSni(host) }
         relay.onBlock = { host -> Stats.onSniBlock(host) }
         instance = this
     }
@@ -546,11 +545,25 @@ class DnsVpnService : VpnService() {
     }
 
     private fun reloadRules() {
-        val subs = Prefs.loadSubs()
+        // 只有启用的订阅参与，顺序就是用户拖出来的优先级
+        val subs = Prefs.loadSubs().filter { it.enabled }
         val sources = SubStore.loadAll(this, subs)
-        engine.rebuild(sources, Prefs.customRules)
+        val disabled = Prefs.builtinDisabled
+        val on = Prefs.builtinEnabled
+        val builtinDns = if (on) BuiltinRules.text(this, BuiltinRules.SCOPE_DNS, disabled) else ""
+        val builtinSni = if (on) BuiltinRules.text(this, BuiltinRules.SCOPE_SNI, disabled) else ""
+        // 层序：自定义（最高）> 订阅（按列表顺序）> 内置（最低）
+        engine.rebuild(sources, Prefs.customRules, listOf(builtinDns))
+        sniEngine.rebuild(sources, Prefs.customRules, listOf(builtinDns, builtinSni))
         Stats.rules = engine.ruleCount
+        Stats.sniRules = sniEngine.ruleCount
         if (::pipeline.isInitialized) pipeline.clearCache()
+    }
+
+    /** SNI 层判定：直播 CDN 特判 + 规则引擎（例外永远先于拦截）。 */
+    private fun shouldBlockSni(host: String): Boolean {
+        if (!Prefs.sniBlockEnabled) return false
+        return SniRules.shouldBlock(sniEngine, host, Prefs.blockLiveCdn)
     }
 
     private fun readLoop(pfd: ParcelFileDescriptor) {

@@ -11,6 +11,7 @@ import com.shielddns.android.Prefs
 import com.shielddns.android.Stats
 import com.shielddns.android.SubStore
 import com.shielddns.android.Ui
+import com.shielddns.android.BuiltinRules
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -202,7 +203,8 @@ class OverviewPage(private val a: MainActivity) : Page {
         rulesText.text = if (Stats.rules > 0) "生效规则 ${Stats.rules} 条" else "生效规则 —"
 
         val lastUpd = Prefs.lastUpdateAll
-        val subCount = Prefs.loadSubs().size
+        // 内置策略也是一条订阅，计数里必须带上，否则概览和订阅页对不上
+        val subCount = Prefs.loadSubs().size + 1
         subText.text = buildString {
             append("订阅更新 ")
             append(if (lastUpd > 0) fmt.format(Date(lastUpd)) else "尚未更新")
@@ -286,31 +288,39 @@ class OverviewPage(private val a: MainActivity) : Page {
     private fun updateAll() {
         if (updating) return
         val subs = Prefs.loadSubs()
-        if (subs.isEmpty()) {
-            updateBtn.text = "还没有订阅，先加一条"
-            updateBtn.postDelayed({ updateBtn.text = "更新全部订阅" }, 1800)
-            return
-        }
         updating = true
         updateBtn.text = "更新中…"
         updateBtn.isEnabled = false
-        SubStore.refreshAll(a, subs, { _ -> }, { changed, unchanged, fail ->
-            Prefs.saveSubs(subs)
-            a.runOnUiThread {
-                updating = false
-                updateBtn.isEnabled = true
-                // 区分「内容真的变了」和「拉到了但没变化」，别把成功下载数当成更新数
-                updateBtn.text = when {
-                    changed > 0 && fail == 0 -> "已更新 $changed 条订阅"
-                    changed > 0 -> "更新 $changed 条，失败 $fail 条"
-                    unchanged > 0 && fail == 0 -> "$unchanged 条订阅已是最新"
-                    unchanged > 0 -> "无变化，$fail 条失败"
-                    else -> "更新失败，检查网络或链接"
-                }
-                a.reloadService()
-                refresh()
-                updateBtn.postDelayed({ updateBtn.text = "更新全部订阅" }, 3000)
+        // 内置策略同样是一条订阅，先更新它，再更新用户订阅，最后合并计数
+        BuiltinRules.update(a) { _, _, bChanged, bErr ->
+            val bFail = if (bErr == null) 0 else 1
+            val bUpd = if (bChanged && bErr == null) 1 else 0
+            val bSame = if (!bChanged && bErr == null) 1 else 0
+            if (subs.isEmpty()) {
+                finishAll(bUpd, bSame, bFail)
+            } else {
+                SubStore.refreshAll(a, subs, { _ -> }, { changed, unchanged, fail ->
+                    Prefs.saveSubs(subs)
+                    finishAll(changed + bUpd, unchanged + bSame, fail + bFail)
+                })
             }
-        })
+        }
+    }
+
+    private fun finishAll(changed: Int, unchanged: Int, fail: Int) {
+        a.runOnUiThread {
+            updating = false
+            updateBtn.isEnabled = true
+            updateBtn.text = when {
+                changed > 0 && fail == 0 -> "已更新 $changed 条订阅"
+                changed > 0 -> "更新 $changed 条，失败 $fail 条"
+                unchanged > 0 && fail == 0 -> "$unchanged 条订阅已是最新"
+                unchanged > 0 -> "无变化，$fail 条失败"
+                else -> "更新失败，检查网络或链接"
+            }
+            a.reloadService()
+            refresh()
+            updateBtn.postDelayed({ updateBtn.text = "更新全部订阅" }, 3000)
+        }
     }
 }

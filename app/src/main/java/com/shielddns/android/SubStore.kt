@@ -134,16 +134,28 @@ object SubStore {
             val f = fileFor(ctx, sub)
             val old = if (f.exists()) runCatching { f.readText() }.getOrDefault("") else ""
             val before = if (old.isEmpty()) 0 else countRules(old)
-            val changed = old != text
-            if (changed) {
+            val newCount = countRules(text)
+            // 内容是否要落盘：看规则条目指纹（注释、空行、顺序差异不算）
+            val contentChanged = ruleSignature(old) != ruleSignature(text)
+            if (contentChanged) {
                 f.parentFile?.mkdirs()
                 f.writeText(text)
             }
-            return SubDownload(countRules(text), before, changed)
+            // 给用户看的「有没有变化」：只看规则条数增减。
+            // 云盘/CDN 直链每次返回的字节可能带随机 token，按字节判会次次误报。
+            return SubDownload(newCount, before, newCount != before)
         } finally {
             runCatching { conn.disconnect() }
         }
     }
+
+    /** 规则指纹：去掉注释、空行，按行去空白后排序拼起来。 */
+    fun ruleSignature(text: String): String =
+        text.lineSequence()
+            .map { it.trim().removePrefix("\uFEFF") }
+            .filter { it.isNotEmpty() && !it.startsWith("!") && !it.startsWith("#") }
+            .sorted()
+            .joinToString("\n")
 
     fun countRules(text: String): Int {
         var n = 0

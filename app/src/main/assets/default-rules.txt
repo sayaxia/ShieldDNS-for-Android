@@ -1,0 +1,89 @@
+# ShieldDNS 内置规则
+# 语法与自定义规则一致：||域名^ 拦截该域及其子域，@@||域名^ 例外放行（优先于拦截），* 通配
+# 分段标记：# == [dns] == 同时作用于 DNS 层和 SNI 层；# == [sni] == 只作用于 SNI 增强拦截
+# 不需要某条时，在「过滤订阅」里把这条内置策略整条关掉即可，或把需要的例外写进自定义规则
+
+# == [dns] ==
+# 红果广告投放接口。机房变体 ads3-normal-hl / -lf / -lq 与无后缀都存在，只认 -hl 会漏
+||ads*.zijieapi.com^
+||ad.zijieapi.com^
+# 广告素材与签名：服务端每次随机下发前缀，只能按命名特征拦
+||*-reading-ad.*^
+||*-ad-sign*^
+||*-mgsdk-sign*^
+# 激励视频挂件与优量汇点击
+||praisewindow.ugsdk.cn^
+||pgdt.gtimg.cn^
+# 巨量引擎（广告主投放后台与素材）
+||oceanengine.com^
+# 例外：正片、正片 CDN、书封图片优先放行。判定顺序在代码里，例外永远先于拦截
+@@||*reading-video*^
+@@||*videocdn*^
+@@||*reading.fqnovelstatic*^
+@@||*reading.fqnovelpic*^
+@@||*misc-hl.fqnovel.com^
+@@||*applog-hl.fqnovel.com^
+@@||*novel.byteimg.com^
+
+# == [sni] ==
+# 以下域名整域专属某家广告 SDK，只对白名单应用生效，不波及其它 App
+# 字节 / 穿山甲 Pangle
+||dailygn.com^
+||pangle.io^
+||pangleglobal.com^
+||csjplatform.com^
+||csjdeveloper.com^
+||pangolin-sdk-toutiao.com^
+||ug.snssdk.com^
+# 腾讯优量汇 / 广点通
+||gdt.qq.com^
+||gdtimg.com^
+||adnet.qq.com^
+# 百度联盟
+||mobads.baidu.com^
+||bes.baidu.com^
+# 阿里妈妈
+||tanx.com^
+||alimama.com^
+# Sigmob
+||sigmob.cn^
+||sigmob.com^
+# Mintegral / 汇量
+||mintegral.com^
+||mintegral.net^
+||mobvista.com^
+# AppLovin / MoPub
+||applovin.com^
+||applvn.com^
+||mopub.com^
+# Unity Ads / ironSource
+||unityads.unity3d.com^
+||ironsrc.com^
+||supersonicads.com^
+# Vungle / Liftoff
+||vungle.com^
+||vungle.tv^
+||liftoff.io^
+# Google AdMob
+||doubleclick.net^
+||googlesyndication.com^
+||googleadservices.com^
+||admob.com^
+# 其它主流联盟
+||chartboost.com^
+||inmobi.com^
+||inmobi.cn^
+||amazon-adsystem.com^
+||criteo.com^
+||criteo.net^
+||taboola.com^
+||outbrain.com^
+||smaato.net^
+||pubmatic.com^
+||openx.net^
+||tapjoy.com^
+||adcolony.com^
+||appnext.com^
+||flurry.com^
+||nexage.com^
+||inner-active.mobi^

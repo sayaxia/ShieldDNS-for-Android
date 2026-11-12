@@ -74,6 +74,10 @@ object Stats {
     @Volatile
     var rules: Int = 0
 
+    /** SNI 层生效规则条数（内置 sni 段比 DNS 层多一批 SDK 整域） */
+    @Volatile
+    var sniRules: Int = 0
+
     val recent = ConcurrentLinkedDeque<LogEntry>()
 
     /** 增强模式采集到的 SNI，最多 500 条，诊断导出时单独成段。 */
